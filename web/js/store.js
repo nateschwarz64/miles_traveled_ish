@@ -156,7 +156,9 @@ export function person(pid) {
     const s = byDay[d];
     const place = s ? s.place : home;
     if (!place) continue;
-    nights.push({ d, place, home, away: !!s && s.place !== home, trip: s ? s.trip_id || '' : '', country: X.countryOf(place) });
+    // an "In transit" stay (overnight layover, never left the airport) is away, but doesn't count for the country
+    const transit = !!s && s.confidence === 'In transit';
+    nights.push({ d, place, home, away: !!s && s.place !== home, transit, trip: s ? s.trip_id || '' : '', country: transit ? '' : X.countryOf(place) });
   }
   const homeNow = homes.length ? homes[homes.length - 1].place : '';
   const homeCountry = X.countryOf(homeNow) || (nights.length ? mode(nights.map(n => n.country)) : 'United States');
@@ -170,8 +172,23 @@ export function person(pid) {
   const visited = uniq(nightCountries.concat(legs.flatMap(groundCountries)));
   const airportOnly = uniq(legs.filter(isFlight).flatMap(l => [X.countryOf(l.from_place), X.countryOf(l.to_place)]).filter(c => c && !visited.includes(c)));
   const states = uniq(nights.filter(n => n.country === 'United States').map(n => X.stateOf(n.place)).filter(Boolean));
+  // calendar days abroad: every day from leaving to getting back on an international trip, plus days living abroad
+  const abroadDays = new Set();
+  const foreign = p => { const c = X.countryOf(p); return !!c && c !== homeCountry; };
+  nights.forEach(n => { if (n.home && foreign(n.home)) abroadDays.add(n.d); });
+  trips.forEach(t => {
+    const tl = legs.filter(l => l.trip_id === t.id), ts = stays.filter(s => s.trip_id === t.id);
+    if (!tl.some(l => foreign(l.from_place) || foreign(l.to_place)) && !ts.some(s => foreign(s.place))) return;
+    const ds = [t.start_date, t.end_date].concat(tl.map(l => l.date), ts.flatMap(s => [s.arrive, s.leave])).filter(isDate).sort();
+    for (let d = ds[0]; d && d <= ds[ds.length - 1] && d <= today; d = addDays(d, 1)) abroadDays.add(d);
+  });
+  // home airport = the airport you fly in and out of most
+  const apCount = {};
+  flights.forEach(l => [l.from_airport, l.to_airport].forEach(a => { if (a) apCount[a] = (apCount[a] || 0) + 1; }));
+  const homeAirport = Object.keys(apCount).sort((a, b) => apCount[b] - apCount[a])[0] || '';
   const P = {
     id: pid, legs, stays, homes, nights, homeNow, homeCountry, trips, flights, miles, flightMiles, roadMiles: miles - flightMiles,
+    daysAbroad: abroadDays.size, homeAirport, homeAirportFlights: flights.filter(l => l.from_airport === homeAirport || l.to_airport === homeAirport).length,
     visited, airportOnly, visitedAbroad: visited.filter(c => c !== homeCountry), sleptAbroad: nightCountries.filter(c => c !== homeCountry),
     nightsAbroad: nights.filter(n => n.country && n.country !== homeCountry).length,
     states, states50: states.filter(s => s !== 'District of Columbia'),

@@ -823,6 +823,8 @@ function renderStats() {
   el.innerHTML = `<h1>${y === 'All' ? esc(me.name) + "'s stats" : esc(y) + ' in review'}</h1>
     <div class="seg" style="margin:8px 0 12px">${['All'].concat(years).map(v => `<button class="${y === v ? 'on' : ''}" data-click="statsYear" data-arg="${v}">${v === 'All' ? 'All time' : v}</button>`).join('')}</div>
     <div class="grid">${statCard(fmt(Y.miles), 'miles')}${statCard(Y.flights.length, 'flights')}${statCard(Y.trips.length, 'trips')}${statCard(Y.countries.length, y === 'All' && P.airportOnly.length ? `countries visited (+${P.airportOnly.length} airport only)` : 'countries visited')}${statCard(fmt(Y.abroad), 'nights abroad')}${statCard(Y.byState.length, 'US states slept in')}
+      ${y === 'All' ? statCard(fmt1(P.daysAbroad / 7), `weeks abroad (${fmt1(P.daysAbroad / 365.25)} years)`) : ''}
+      ${y === 'All' && P.homeAirport ? statCard(P.homeAirportFlights, `flights in/out of ${esc(P.homeAirport)}`) : ''}
       ${y === 'All' && cost ? statCard('$' + fmt(cost), 'logged costs') : ''}</div>
     ${y !== 'All' ? `<button class="btn gold" style="width:100%;margin-top:12px" data-click="wrapped" data-arg="${esc(y)}">✨ Play ${esc(y)} Wrapped</button>` : ''}
     ${y === 'All' ? `
