@@ -182,6 +182,8 @@ function routeLines(legs) { return legs.map(legEnds).filter(([a, b]) => a && b).
 
 function homeAlerts(P) {
   const out = [], today = S.today;
+  const lb = lastBackup();
+  if (db.kind !== 'local' && (!lb || daysBetween(lb, today) > 30)) out.push({ html: `<b>💾 Time for a backup</b><div class="small">${lb ? 'Last one was ' + daysBetween(lb, today) + ' days ago' : 'No backup on this device yet'}. Tap to download your data.</div>`, click: 'exportJson' });
   D().documents.filter(d => d.person_id === S.focus && isDate(d.expires)).forEach(d => {
     const left = daysBetween(today, d.expires);
     if (left <= 180) out.push({ html: `<b>🛂 ${esc(d.type || 'Document')} ${left < 0 ? 'expired' : 'expires in ' + left + ' days'}</b><div class="small">${esc(d.name || '')} · ${niceDate(d.expires)}</div>`, click: 'more' });
@@ -1245,7 +1247,10 @@ function moreSheet() {
     <div class="card"><p class="small muted">Pick the files from your old AppSheet folders (Trips_Images, Legs_Images…). Each one is matched to its trip or leg by file name.</p><button class="btn small ghost" data-click="importLegacy">Choose photos</button></div>
     <div class="section"><h3>Add to your lists</h3></div>
     <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="newPlace">+ Place</button><button class="btn small ghost" data-click="newPerson">+ Person</button><button class="btn small ghost" data-click="newHome" data-arg="${esc(S.focus)}">+ Home</button></div>
-    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="exportJson">Download a backup</button><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>`;
+    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>
+    <div class="section"><h3>Backups</h3><span class="kicker">${lastBackup() ? 'last one ' + niceDate(lastBackup()) : 'none on this device yet'}</span></div>
+    <div class="card"><p class="small muted">The data file has every trip, flight, stay, place, person and story. Photos come as a separate .zip. Keep both somewhere safe, like Google Drive. Restoring adds back anything missing and puts matching rows back to the backup's version; anything added since stays.</p>
+      <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="exportJson">Download data</button><button class="btn small ghost" data-click="exportPhotos">Download photos (.zip)</button><button class="btn small ghost" data-click="restoreBackup">Restore from backup</button></div></div>`;
   }, body => {
     const P = F(), upd = () => {
       const a = body.querySelector('#schFrom').value, b = body.querySelector('#schTo').value, c = body.querySelector('#schCountry').value;
@@ -1313,6 +1318,38 @@ async function importKml(file) {
   toast(`${pins.length} pins: ${pins.filter(p => p.place).length} matched to places, ${pins.filter(p => p.trip_id).length} to trips`);
   refresh();
 }
+// ------------------------------------------------------------------ backups
+const BACKUP_KEY = 'mt-last-backup';
+function lastBackup() { try { return localStorage.getItem(BACKUP_KEY) || ''; } catch (e) { return ''; } }
+function setLastBackup() { try { localStorage.setItem(BACKUP_KEY, S.today); } catch (e) { /* private mode: no reminder, nothing else breaks */ } }
+function downloadBlob(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
+async function exportPhotos() {
+  const paths = uniq(['photos', 'people', 'trips', 'legs'].flatMap(t => D()[t].map(r => t === 'photos' ? r.path : r.photo)).filter(Boolean));
+  if (!paths.length) return toast('No photos yet.');
+  const zip = new JSZip(); let done = 0, missing = 0;
+  for (let i = 0; i < paths.length; i += 50) {
+    const batch = paths.slice(i, i + 50), urls = await db.sign(batch);
+    await Promise.all(batch.map(async p => {
+      try { if (!urls[p]) throw 0; const r = await fetch(urls[p]); if (!r.ok) throw 0; zip.file(p, await r.blob()); } catch (e) { missing++; }
+      if (++done % 25 === 0) toast(`Zipping photos… ${done} of ${paths.length}`);
+    }));
+  }
+  downloadBlob(await zip.generateAsync({ type: 'blob' }), `miles-traveled-photos-${S.today}.zip`);
+  toast(`Saved ${paths.length - missing} photos${missing ? ` (${missing} could not be found)` : ''}.`);
+}
+// parents before children, so every reference already exists when a row lands
+const RESTORE_ORDER = ['countries', 'people', 'places', 'airports', 'trips', 'legs', 'stays', 'stories', 'photos', 'documents', 'wishes', 'packing', 'packing_checks', 'homes', 'layers', 'pins'];
+async function restoreBackup(file) {
+  let data; try { data = JSON.parse(await file.text()); } catch (e) { throw new Error('That file is not a Miles Traveled backup.'); }
+  if (!data || !Array.isArray(data.trips) || !Array.isArray(data.legs)) throw new Error('That file is not a Miles Traveled backup.');
+  const n = RESTORE_ORDER.reduce((a, t) => a + (Array.isArray(data[t]) ? data[t].length : 0), 0);
+  if (!confirm(`Restore ${fmt(n)} rows from ${file.name}? Anything missing comes back, and matching rows go back to the backup's version. Nothing added since gets deleted.`)) return;
+  for (const t of RESTORE_ORDER) {
+    const rows = Array.isArray(data[t]) ? data[t] : [];
+    for (let i = 0; i < rows.length; i += 500) { toast(`Restoring ${t}…`); await db.upsertMany(t, rows.slice(i, i + 500)); }
+  }
+  await load(); refresh(); toast(`Restored ${fmt(n)} rows.`);
+}
 async function importLegacy(files) {
   const base = s => String(s || '').split('/').pop().toLowerCase();
   let n = 0, skipped = 0;
@@ -1376,7 +1413,9 @@ const ACTIONS = {
   shareStays: a => submit(async () => { const st = sharedStays(a); await saveMany('stays', st.map(s => Object.assign({}, s, { people: uniq((s.people || []).concat(a)) }))); toast(`Added ${P0(a).name} to ${st.length} stays`); refresh(); }),
   addLegRow: () => $('#legRows').insertAdjacentHTML('beforeend', legRowHtml()), addStayRow: () => $('#stayRows').insertAdjacentHTML('beforeend', stayRowHtml()),
   removeRow: (a, el) => el.closest('.leg-row').remove(),
-  exportJson: () => { const b = new Blob([JSON.stringify(S.D, null, 1)], { type: 'application/json' }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = `miles-traveled-${S.today}.json`; a.click(); URL.revokeObjectURL(u); },
+  exportJson: () => { downloadBlob(new Blob([JSON.stringify(S.D, null, 1)], { type: 'application/json' }), `miles-traveled-${S.today}.json`); setLastBackup(); refresh(); },
+  exportPhotos: () => submit(exportPhotos),
+  restoreBackup: () => pickFiles(false, files => submit(() => restoreBackup(files[0])), '.json,application/json'),
   signOut: async () => { await db.signOut(); location.reload(); },
 };
 document.addEventListener('click', e => {
