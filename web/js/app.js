@@ -327,7 +327,7 @@ function tripHtml(id) {
     ${t.notes ? `<p class="small muted">${esc(t.notes)}</p>` : ''}
     <div class="row wrap" style="gap:8px;margin:12px 0">
       <button class="btn small" data-click="editTrip" data-arg="${esc(id)}">Edit</button><button class="btn small ghost" data-click="newLeg" data-arg="${esc(id)}">+ Flight/drive</button>
-      <button class="btn small ghost" data-click="newStay" data-arg="${esc(id)}">+ Stay</button><button class="btn small ghost" data-click="newStory" data-arg="${esc(id)}">+ Story</button>
+      <button class="btn small ghost" data-click="newStay" data-arg="${esc(id)}">+ Stay</button><button class="btn small ghost" data-click="newStory" data-arg="${esc(id)}">+ Story</button><button class="btn small gold" data-click="flyover" data-arg="${esc(id)}">🎬 Fly this trip</button>
       <button class="btn small ghost" data-click="addPhotos" data-arg="${esc(id)}">+ Photos</button><button class="btn small ghost" data-click="mapTrip" data-arg="${esc(id)}">Big map</button></div>
     ${stories.length ? `<div class="section"><h3>Stories</h3></div>${stories.map(s => storyCard(s)).join('')}` : ''}
     ${photos.length ? `<div class="section"><h3>Photos</h3></div>${photoGrid(photos)}` : ''}
@@ -1012,6 +1012,79 @@ function wrapped(year) {
   box.classList.remove('hidden'); show(0);
 }
 
+// Trip flyover: a globe whose camera follows each flight and drive with a little plane, zooming in for
+// short hops, and a postcard for every place you slept. Ends on a summary card.
+async function flyover(id) {
+  const t = X().trip[id]; if (!t) return;
+  const legs = (X().legsByTrip.get(id) || []).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1])
+    .sort((a, b) => String(a.l.date) < String(b.l.date) ? -1 : String(a.l.date) > String(b.l.date) ? 1 : String(a.l.id).localeCompare(String(b.l.id), undefined, { numeric: true }));
+  const stays = (X().staysByTrip.get(id) || []).filter(s => X().ll[s.place]).sort((a, b) => a.arrive < b.arrive ? -1 : 1);
+  if (!legs.length && !stays.length) return toast('Add flights, drives or stays to fly this trip.', true);
+  // one timeline: on the same day the leg comes before the stay it lands at
+  const ev = legs.map(x => ({ kind: 'leg', d: x.l.date || '', ...x })).concat(stays.map(s => ({ kind: 'stay', d: s.arrive, s })))
+    .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : a.kind === b.kind ? 0 : a.kind === 'leg' ? -1 : 1);
+  const box = $('#wrapped'); box.classList.remove('hidden');
+  box.style.background = 'radial-gradient(120% 90% at 20% 10%, #1f2a44, #0d1018)';
+  box.innerHTML = `<button class="icon x" data-w="close">✕</button><div class="fly-title"><b>${esc(t.name)}</b><div class="fly-hud"><span id="flyDate">${t.start_date ? niceDate(t.start_date) : ''}</span><span><b id="flyMiles">0</b> mi</span></div></div>
+    <canvas class="fly-canvas"></canvas><div class="fly-card hidden"></div>`;
+  const st = { stop: false };
+  box.onclick = e => { if (e.target.closest('[data-w=close]')) { st.stop = true; box.classList.add('hidden'); box.onclick = null; } else if (e.target.closest('[data-w=again]')) { st.stop = true; flyover(id); } };
+  let land = null, borders = null;
+  try { const topo = await cachedJson(CDN.world110); land = topojson.feature(topo, topo.objects.land); borders = topojson.mesh(topo, topo.objects.countries, (a, b) => a !== b); } catch (e) { /* draw without land */ }
+  const canvas = box.querySelector('canvas'), dpr = window.devicePixelRatio || 1, W = box.clientWidth, H = box.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const R = Math.min(W, H) * .42, proj = d3.geoOrthographic().translate([W / 2, H / 2]).clipAngle(90).precision(.3), path = d3.geoPath(proj, ctx);
+  const lonlat = ll => [ll[1], ll[0]], done = [], dots = [];
+  let cam = lonlat((legs[0] || { e: [X().ll[stays[0].place]] }).e[0]), zoom = 1, plane = null, miles = 0;
+  const zoomFor = (a, b) => Math.max(1, Math.min(40, .9 / (d3.geoDistance(a, b) + .02)));
+  const draw = () => {
+    proj.rotate([-cam[0], -cam[1]]).scale(R * zoom);
+    ctx.clearRect(0, 0, W, H);
+    ctx.beginPath(); path({ type: 'Sphere' }); ctx.fillStyle = '#2b5aa8'; ctx.fill();
+    ctx.beginPath(); path(d3.geoGraticule10()); ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = .6; ctx.stroke();
+    if (land) { ctx.beginPath(); path(land); ctx.fillStyle = '#f3d36b'; ctx.fill(); }
+    if (borders) { ctx.beginPath(); path(borders); ctx.strokeStyle = 'rgba(120,90,20,.45)'; ctx.lineWidth = .6; ctx.stroke(); }
+    done.forEach(x => { ctx.beginPath(); path({ type: 'LineString', coordinates: x.pts }); ctx.setLineDash(x.flight ? [5, 4] : []); ctx.strokeStyle = x.flight ? '#ffffff' : '#c8402f'; ctx.lineWidth = 2.2; ctx.stroke(); });
+    ctx.setLineDash([]);
+    dots.forEach(c => { if (d3.geoDistance(c, cam) > Math.PI / 2) return; const p = proj(c); ctx.beginPath(); ctx.arc(p[0], p[1], 4.5, 0, 7); ctx.fillStyle = '#c8402f'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); });
+    if (plane && d3.geoDistance(plane.at, cam) < Math.PI / 2) { const p = proj(plane.at); ctx.font = '22px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(plane.icon, p[0], p[1]); }
+  };
+  const anim = (ms, f) => new Promise(res => { const t0 = performance.now(); const step = now => { if (st.stop) return res(); const k = Math.min(1, (now - t0) / ms); f(k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2); draw(); if (k < 1) requestAnimationFrame(step); else res(); }; requestAnimationFrame(step); });
+  const wait = ms => new Promise(res => setTimeout(res, ms));
+  const card = box.querySelector('.fly-card'), hud = k => { $('#flyMiles').textContent = fmt(miles); if (k) $('#flyDate').textContent = niceDate(k); };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const x of ev) {
+    if (st.stop) return;
+    if (x.kind === 'leg') {
+      const a = lonlat(x.e[0]), b = lonlat(x.e[1]), flight = isFlight(x.l), gi = d3.geoInterpolate(a, b), z1 = zoomFor(a, b), cam0 = cam, z0 = zoom, ci = d3.geoInterpolate(cam0, a);
+      hud(x.l.date); card.classList.add('hidden');
+      if (!reduce) await anim(700, k => { cam = ci(k); zoom = z0 + (z1 - z0) * k; });
+      const line = { flight, pts: [a] }; done.push(line); const m0 = miles;
+      const ms = reduce ? 0 : Math.max(900, Math.min(3600, 500 + Math.sqrt(num(x.l.miles)) * 35));
+      plane = { flight, at: a, icon: flight ? '✈️' : ({ Train: '🚆', Boat: '⛴', Bus: '🚌', Hike: '🥾' })[x.l.mode] || '🚗' };
+      if (ms) await anim(ms, k => { const c = gi(k); cam = c; plane.at = c; line.pts = d3.range(0, k + 1e-9, Math.max(k / 40, .001)).map(gi).concat([c]); miles = m0 + num(x.l.miles) * k; hud(); });
+      line.pts = d3.range(0, 1.0001, .025).map(gi); miles = m0 + num(x.l.miles); cam = b; plane = null; hud(); draw();
+    } else {
+      const s = x.s, c = lonlat(X().ll[s.place]), n = daysBetween(s.arrive, s.leave);
+      if (!dots.some(d => d[0] === c[0] && d[1] === c[1])) dots.push(c);
+      if (!reduce && d3.geoDistance(c, cam) > .001) { const ci = d3.geoInterpolate(cam, c); await anim(600, k => { cam = ci(k); }); }
+      hud(s.arrive); draw();
+      const story = D().stories.find(r => r.stay_id === s.id) || D().stories.find(r => r.trip_id === id && r.place === s.place);
+      const ph = D().photos.find(p => p.stay_id === s.id) || D().photos.find(p => p.trip_id === id && p.place === s.place);
+      card.innerHTML = `${ph ? `<div class="polaroid">${img(ph.path)}</div>` : ''}<div class="k">${niceDate(s.arrive)}</div><b>${esc(s.place.split(',')[0])}</b><div class="s">${esc(s.place.split(',').slice(1).join(',').trim())} · ${n} night${n === 1 ? '' : 's'}${s.confidence === 'In transit' ? ' · in transit' : ''}</div>${story ? `<p>${esc(story.title || String(story.body || '').slice(0, 90))}</p>` : ''}`;
+      hydrateImages(card); card.classList.remove('hidden');
+      await wait(reduce ? 0 : 1700 + (story || ph ? 1200 : 0));
+    }
+  }
+  if (st.stop) return;
+  plane = null;
+  if (!reduce) { const b = done.flatMap(l => l.pts).concat(dots); if (b.length) { const ctr = d3.geoCentroid({ type: 'MultiPoint', coordinates: b }), ci = d3.geoInterpolate(cam, ctr), z0 = zoom; await anim(1200, k => { cam = ci(k); zoom = z0 + (1 - z0) * k; }); } }
+  const nightsN = sum(stays, s => daysBetween(s.arrive, s.leave)), cs = tripCountries(id);
+  card.innerHTML = `<div class="k">The whole trip</div><b>${esc(t.name)}</b><div class="fly-stats"><div><b>${fmt(miles)}</b><span>miles</span></div><div><b>${fmt(nightsN)}</b><span>nights</span></div><div><b>${cs.length}</b><span>countr${cs.length === 1 ? 'y' : 'ies'}</span></div></div><div class="row" style="gap:8px;justify-content:center;margin-top:10px"><button class="btn small gold" data-w="again">↻ Again</button><button class="btn small fly-done" data-w="close">Done</button></div>`;
+  card.classList.remove('hidden'); card.classList.add('end');
+}
+
 // ------------------------------------------------------------------ MAP
 const mapOpts = { slept: true, routes: true, countries: false, states: false, year: 'All', trip: '', earth: {}, panelOpen: innerWidth > 640 };
 function renderMap() {
@@ -1458,7 +1531,7 @@ const ACTIONS = {
   photosAtPlace: a => pickFiles(true, files => uploadPhotos(files, { place: a }).then(refresh)),
   facePhoto: a => pickFiles(false, async files => { const blob = await shrink(files[0], 400), path = await db.upload(`faces/${a}-${Date.now()}.jpg`, blob); await save('people', Object.assign({}, X().person[a], { photo: path })); toast('Looking good'); refresh(); }),
   mapTrip: a => { closeAll(); mapOpts.trip = a; mapOpts.year = 'All'; go('map'); setTimeout(() => drawMap(true), 120); },
-  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, familyPaths: () => { closeAll(); startFamilyPaths(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
+  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, familyPaths: () => { closeAll(); startFamilyPaths(); }, flyover: a => { closeAll(); flyover(a); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
   deleteTrip: a => { if ((X().legsByTrip.get(a) || []).length || (X().staysByTrip.get(a) || []).length) return toast('Delete or move its flights, drives and stays first.', true); confirmDel('trips', a, 'this trip').then(() => closeAll()); },
   deleteLeg: a => confirmDel('legs', a, 'this flight or drive'), deleteStay: a => confirmDel('stays', a, 'this stay'), deleteStory: a => confirmDel('stories', a, 'this story'),
   deletePhoto: a => { const p = D().photos.find(x => x.id === a); confirmDel('photos', a, 'this photo', () => db.removeFile(p.path)); },
