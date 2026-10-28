@@ -1022,6 +1022,7 @@ function renderMap() {
   panel.innerHTML = `<div class="row between"><b>Layers</b><button class="icon small" data-click="mapPanel">${mapOpts.panelOpen ? '–' : '☰'}</button></div><div class="body">
     <button class="btn small gold" style="width:100%;margin:6px 0" data-click="replay">▶ Replay ${esc(P0(S.focus).name)}'s travels</button>
     <button class="btn small ghost" style="width:100%;margin:0 0 6px" data-click="whereWasI">🕰 Where was I?</button>
+    <button class="btn small ghost" style="width:100%;margin:0 0 6px" data-click="familyPaths">👨‍👩‍👧 Family paths</button>
     <label><input type="checkbox" data-map="slept" ${mapOpts.slept ? 'checked' : ''}> Where I slept</label>
     <label><input type="checkbox" data-map="routes" ${mapOpts.routes ? 'checked' : ''}> Flights and drives</label>
     <label><input type="checkbox" data-map="countries" ${mapOpts.countries ? 'checked' : ''}> Countries by nights</label>
@@ -1206,6 +1207,71 @@ function startWhereWasI() {
   show(0);
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play(true);
   mapLayers.replay = g;
+}
+// Family paths: everyone's flights and drives in their own color, with a star wherever two or more of
+// them slept in the same place on the same night (away from a shared home) or rode the same leg.
+const familyPicked = new Set();
+function startFamilyPaths() {
+  if (UI.page !== 'map') { go('map'); setTimeout(startFamilyPaths, 300); return; }
+  stopReplay();
+  const people = D().people.filter(p => p.kind !== 'group').map(p => ({ p, P: person(p.id) })).filter(x => x.P.legs.length || x.P.stays.length)
+    .sort((a, b) => (b.p.id === S.focus) - (a.p.id === S.focus) || b.P.legs.length - a.P.legs.length);
+  if (people.length < 2) return toast('Tag people on flights, drives or stays to see their paths here.', true);
+  if (!familyPicked.size) {
+    // start with you, your family profiles, and the three people you've traveled with most
+    const me = people.find(x => x.p.id === S.focus), shared = x => me ? me.P.legs.filter(l => has(l, x.p.id)).length : 0;
+    people.filter(x => x.p.id === S.focus || x.p.kind === 'family').forEach(x => familyPicked.add(x.p.id));
+    people.filter(x => !familyPicked.has(x.p.id)).sort((a, b) => shared(b) - shared(a)).slice(0, 3).forEach(x => familyPicked.add(x.p.id));
+  }
+  const bar = $('#replayBar'); bar.classList.remove('hidden'); bar.classList.add('wwi');
+  const st = replayState = { stop: false };
+  const draw = () => {
+    if (st.stop) return;
+    Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
+    const on = people.filter(x => familyPicked.has(x.p.id)), g = L.featureGroup().addTo(map);
+    // wider lines first, so a leg two people shared shows as stacked stripes
+    on.forEach((x, k) => {
+      const col = personColor(x.p), w = 2 + (on.length - 1 - k) * 1.5;
+      x.P.legs.forEach(l => {
+        const [a, b] = legEnds(l); if (!a || !b || (a[0] === b[0] && a[1] === b[1])) return;
+        L.polyline(isFlight(l) ? arc(a, b) : [a, b], { color: col, weight: w, opacity: .75 }).bindTooltip(`${esc(x.p.name)}: ${esc(l.name || '')} · ${niceDate(l.date)}`).addTo(g);
+      });
+    });
+    // crossings: same place, same night, at least one of them away from home; runs of nights merge into one star
+    const byNight = {};
+    on.forEach(x => x.P.nights.forEach(n => { if (!n.transit) (byNight[n.d + '|' + n.place] = byNight[n.d + '|' + n.place] || []).push({ id: x.p.id, away: n.away }); }));
+    const runs = [];
+    Object.keys(byNight).sort().forEach(k => {
+      const who = byNight[k]; if (who.length < 2 || !who.some(w => w.away)) return;
+      const [d, place] = k.split('|'), ids = who.map(w => w.id).sort().join(',');
+      const last = runs.find(r => r.place === place && r.ids === ids && addDays(r.to, 1) === d);
+      if (last) { last.to = d; last.n++; } else runs.push({ place, ids, from: d, to: d, n: 1 });
+    });
+    // legs ridden together, one star per trip and group of people
+    const together = {};
+    on.forEach(x => x.P.legs.forEach(l => {
+      const ids = on.filter(y => has(l, y.p.id)).map(y => y.p.id).sort(); if (ids.length < 2) return;
+      const k = (l.trip_id || l.id) + '|' + ids.join(','), t = together[k] = together[k] || { ids: ids.join(','), legs: new Set(), trip: X().trip[l.trip_id] };
+      t.legs.add(l);
+    }));
+    Object.values(together).forEach(t => {
+      const legs = [...t.legs], ds = legs.map(l => l.date).filter(isDate).sort();
+      runs.push({ place: (t.trip && X().ll[t.trip.place] ? t.trip.place : legs[legs.length - 1].to_place), ids: t.ids, from: ds[0], to: ds[ds.length - 1], n: 0, together: `${t.trip ? esc(t.trip.name) : 'the road'} (${legs.length} flight${legs.length === 1 ? '' : 's'} and drives together)` });
+    });
+    runs.forEach(r => {
+      const ll = X().ll[r.place]; if (!ll) return;
+      const names = r.ids.split(',').map(id => esc(P0(id).name)).join(' + ');
+      L.marker(ll, { icon: L.divIcon({ className: 'cross-star', html: '★', iconSize: [18, 18] }), zIndexOffset: 500 })
+        .bindPopup(`<b>${names}</b><br>${r.together ? 'Traveled together: ' + r.together : esc(r.place)}<br>${r.from ? niceDate(r.from) : ''}${r.to && r.to !== r.from ? ' – ' + niceDate(r.to) : ''}${r.n ? ` · ${r.n} night${r.n === 1 ? '' : 's'}` : ''}`).addTo(g);
+    });
+    mapLayers.family = g;
+    bar.innerHTML = `<div class="wwi-top"><div class="grow"><b>Family paths</b><div class="s">★ ${runs.length} time${runs.length === 1 ? '' : 's'} your paths crossed</div></div><button id="fpStop">■</button></div>
+      <div class="fam-chips">${people.map(x => `<button class="fam-chip ${familyPicked.has(x.p.id) ? 'on' : ''}" data-fp="${esc(x.p.id)}" style="--c:${personColor(x.p)}">${esc(x.p.name)}</button>`).join('')}</div>`;
+    bar.querySelectorAll('[data-fp]').forEach(btn => btn.onclick = () => { const id = btn.dataset.fp; familyPicked.has(id) ? familyPicked.delete(id) : familyPicked.add(id); draw(); });
+    $('#fpStop').onclick = () => { stopReplay(); drawMap(); };
+    const b = g.getBounds(); if (b.isValid()) map.fitBounds(b, { paddingTopLeft: [20, 20], paddingBottomRight: [20, bar.offsetHeight + 24] });
+  };
+  draw();
 }
 function stopReplay() { if (replayState) { replayState.stop = true; replayState = null; } const b = $('#replayBar'); if (b) { b.classList.add('hidden'); b.classList.remove('wwi'); } }
 
@@ -1392,7 +1458,7 @@ const ACTIONS = {
   photosAtPlace: a => pickFiles(true, files => uploadPhotos(files, { place: a }).then(refresh)),
   facePhoto: a => pickFiles(false, async files => { const blob = await shrink(files[0], 400), path = await db.upload(`faces/${a}-${Date.now()}.jpg`, blob); await save('people', Object.assign({}, X().person[a], { photo: path })); toast('Looking good'); refresh(); }),
   mapTrip: a => { closeAll(); mapOpts.trip = a; mapOpts.year = 'All'; go('map'); setTimeout(() => drawMap(true), 120); },
-  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
+  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, familyPaths: () => { closeAll(); startFamilyPaths(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
   deleteTrip: a => { if ((X().legsByTrip.get(a) || []).length || (X().staysByTrip.get(a) || []).length) return toast('Delete or move its flights, drives and stays first.', true); confirmDel('trips', a, 'this trip').then(() => closeAll()); },
   deleteLeg: a => confirmDel('legs', a, 'this flight or drive'), deleteStay: a => confirmDel('stays', a, 'this stay'), deleteStory: a => confirmDel('stories', a, 'this story'),
   deletePhoto: a => { const p = D().photos.find(x => x.id === a); confirmDel('photos', a, 'this photo', () => db.removeFile(p.path)); },
