@@ -186,6 +186,15 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px
 .replay.hidden { display: none; } .replay b { font-size: 20px; } .replay .s { color: #d8dbe0; font-size: 12px; }
 .replay button { border: 0; border-radius: 8px; padding: 8px 12px; background: var(--board-text); color: var(--board); font-weight: 700; cursor: pointer; }
 .leaflet-popup-content { font: 13px/1.4 Inter, -apple-system, Arial, sans-serif; }
+.replay.wwi { flex-direction: column; align-items: stretch; gap: 8px; }
+.wwi-top, .wwi-bottom { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wwi-top .grow { min-width: 0; } .wwi-top .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wwi-stat { text-align: right; } .wwi-stat b { font-size: 16px; }
+.wwi-bottom input[type=range] { flex: 1; min-width: 0; accent-color: #eda100; }
+@media (max-width: 520px) { .wwi-stat .s { font-size: 10px; } .wwi-stat b { font-size: 14px; } .replay.wwi b#wwDate { font-size: 16px; } }
+.wwi-pin span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #eda100; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(237,161,0,.7); animation: wwiPulse 1.4s infinite; }
+@keyframes wwiPulse { 70% { box-shadow: 0 0 0 16px rgba(237,161,0,0); } 100% { box-shadow: 0 0 0 0 rgba(237,161,0,0); } }
+@media (prefers-reduced-motion: reduce) { .wwi-pin span { animation: none; } }
 .plane-icon { font-size: 18px; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
 
 /* forms */

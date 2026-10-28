@@ -161,6 +161,7 @@ function renderHome() {
     <button class="hero" data-click="imHere"><b>📍 I'm here</b><span>Log tonight's place from your location${P.current ? ' · ' + esc(P.current.name) : ''}</span></button>
     <div class="cta">
       <button data-click="replay"><b>▶ Replay my travels</b><span>Every flight and drive, in order, on the map</span></button>
+      <button data-click="whereWasI"><b>🕰 Where was I?</b><span>Every night since ${esc(yearOf(P.nights[0] && P.nights[0].d) || 'the start')}, on a time slider</span></button>
       <button data-click="wrapped" data-arg="${lastYear}"><b>✨ ${lastYear} Wrapped</b><span>Your year, one tap at a time</span></button>
     </div>
     ${P.current ? `<div class="section"><h2>On a trip right now</h2></div>${tripCard(P.current)}` : ''}
@@ -1018,6 +1019,7 @@ function renderMap() {
   panel.className = 'map-panel' + (mapOpts.panelOpen ? '' : ' min');
   panel.innerHTML = `<div class="row between"><b>Layers</b><button class="icon small" data-click="mapPanel">${mapOpts.panelOpen ? '–' : '☰'}</button></div><div class="body">
     <button class="btn small gold" style="width:100%;margin:6px 0" data-click="replay">▶ Replay ${esc(P0(S.focus).name)}'s travels</button>
+    <button class="btn small ghost" style="width:100%;margin:0 0 6px" data-click="whereWasI">🕰 Where was I?</button>
     <label><input type="checkbox" data-map="slept" ${mapOpts.slept ? 'checked' : ''}> Where I slept</label>
     <label><input type="checkbox" data-map="routes" ${mapOpts.routes ? 'checked' : ''}> Flights and drives</label>
     <label><input type="checkbox" data-map="countries" ${mapOpts.countries ? 'checked' : ''}> Countries by nights</label>
@@ -1138,7 +1140,72 @@ function startReplay() {
   nextLeg();
   mapLayers.replay = g;
 }
-function stopReplay() { if (replayState) { replayState.stop = true; replayState = null; } const b = $('#replayBar'); if (b) b.classList.add('hidden'); }
+// "Where was I?": scrub or play through every night since the first one. A glowing pin sits where you slept,
+// a trail shows the last few places, dots light up as you first reach them, and the counters keep score.
+function startWhereWasI() {
+  if (UI.page !== 'map') { go('map'); setTimeout(startWhereWasI, 300); return; }
+  stopReplay();
+  const P = F(), nights = P.nights.filter(n => X().ll[n.place]);
+  if (!nights.length) return toast('No nights logged yet.', true);
+  Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
+  // running totals as of each night
+  const legs = P.legs.filter(l => isDate(l.date)).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const seen = new Set(), tot = [], changes = [], first = {};
+  let li = 0, miles = 0, abroad = 0;
+  nights.forEach((n, i) => {
+    while (li < legs.length && legs[li].date <= n.d) { miles += num(legs[li].miles); groundCountries(legs[li]).forEach(c => seen.add(c)); li++; }
+    if (n.country) seen.add(n.country);
+    if (n.country && n.country !== P.homeCountry) abroad++;
+    tot.push({ miles, abroad, countries: [...seen].filter(c => c !== P.homeCountry).length });
+    if (!i || n.place !== nights[i - 1].place) changes.push(i);
+    if (first[n.place] === undefined) first[n.place] = i;
+  });
+  const g = L.featureGroup().addTo(map);
+  const dots = Object.keys(first).map(p => ({ p, i: first[p], on: null, m: L.circleMarker(X().ll[p], { radius: 4, color: '#fff', weight: 1, fillColor: '#eda100', fillOpacity: 1 }).bindTooltip(esc(p)) }));
+  const trail = L.polyline([], { color: '#eda100', weight: 2.5, opacity: .8 }).addTo(g);
+  const pin = L.marker(X().ll[nights[0].place], { icon: L.divIcon({ className: 'wwi-pin', html: '<span></span>', iconSize: [18, 18] }), zIndexOffset: 1000 }).addTo(g);
+  map.fitBounds(L.latLngBounds(dots.map(d => X().ll[d.p])).pad(.1));
+  const bar = $('#replayBar'); bar.classList.remove('hidden'); bar.classList.add('wwi');
+  bar.innerHTML = `<div class="wwi-top"><div class="grow"><b id="wwDate">—</b><div class="s" id="wwSub"></div></div>
+      <div class="wwi-stat"><b id="wwAbroad">0</b><div class="s">nights abroad</div></div><div class="wwi-stat"><b id="wwCountries">0</b><div class="s">countries</div></div><div class="wwi-stat"><b id="wwMiles">0</b><div class="s">miles</div></div></div>
+    <div class="wwi-bottom"><button id="wwPlay">▶</button><input id="wwRange" type="range" min="0" max="${nights.length - 1}" value="0" aria-label="Date"><button id="wwSpeed">1×</button><button id="wwStop">■</button></div>`;
+  const st = replayState = { stop: false, speed: 1, playing: false, pos: 0, last: -1 };
+  const show = i => {
+    if (i === st.last) return;
+    const n = nights[i], t = tot[i], ll = X().ll[n.place], moved = st.last < 0 || nights[st.last].place !== n.place;
+    st.last = i;
+    pin.setLatLng(ll);
+    dots.forEach(d => { const on = d.i <= i; if (on !== d.on) { d.on = on; on ? d.m.addTo(g) : g.removeLayer(d.m); } });
+    // trail through the last 12 places, found from the list of nights where the place changed
+    let lo = 0, hi = changes.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (changes[mid] <= i) lo = mid; else hi = mid - 1; }
+    trail.setLatLngs(changes.slice(Math.max(0, lo - 11), lo + 1).map(k => X().ll[nights[k].place]));
+    $('#wwDate').textContent = niceDate(n.d);
+    const trip = n.trip && X().trip[n.trip];
+    $('#wwSub').textContent = `${n.place}${n.away ? (trip ? ' · ' + trip.name : '') : ' · home'}${n.transit ? ' · in transit' : ''}`;
+    $('#wwAbroad').textContent = fmt(t.abroad); $('#wwCountries').textContent = t.countries; $('#wwMiles').textContent = fmt(t.miles);
+    $('#wwRange').value = i;
+    if (moved && !map.getBounds().pad(-.1).contains(ll)) map.panTo(ll, { animate: true, duration: .6 });
+  };
+  const play = on => { st.playing = on; $('#wwPlay').textContent = on ? '❚❚' : '▶'; if (on) { st.t = performance.now(); requestAnimationFrame(tick); } };
+  // nights per second: trips play slowly enough to follow, long stretches at home fly by
+  const tick = t => {
+    if (st.stop || !st.playing) return;
+    const dt = Math.min(.1, (t - st.t) / 1000); st.t = t;
+    const n = nights[Math.floor(st.pos)];
+    st.pos += dt * st.speed * (n.away ? 5 : 60);
+    if (st.pos >= nights.length - 1) { st.pos = nights.length - 1; show(st.pos); play(false); return; }
+    show(Math.floor(st.pos));
+    requestAnimationFrame(tick);
+  };
+  $('#wwRange').oninput = e => { st.pos = +e.target.value; show(st.pos); };
+  $('#wwPlay').onclick = () => { if (st.pos >= nights.length - 1) st.pos = 0; play(!st.playing); };
+  $('#wwSpeed').onclick = () => { st.speed = st.speed === 1 ? 4 : st.speed === 4 ? 16 : 1; $('#wwSpeed').textContent = st.speed + '×'; };
+  $('#wwStop').onclick = () => { stopReplay(); drawMap(); };
+  show(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play(true);
+  mapLayers.replay = g;
+}
+function stopReplay() { if (replayState) { replayState.stop = true; replayState = null; } const b = $('#replayBar'); if (b) { b.classList.add('hidden'); b.classList.remove('wwi'); } }
 
 // ------------------------------------------------------------------ MORE (planning and tools)
 function missingInfo() {
@@ -1288,7 +1355,7 @@ const ACTIONS = {
   photosAtPlace: a => pickFiles(true, files => uploadPhotos(files, { place: a }).then(refresh)),
   facePhoto: a => pickFiles(false, async files => { const blob = await shrink(files[0], 400), path = await db.upload(`faces/${a}-${Date.now()}.jpg`, blob); await save('people', Object.assign({}, X().person[a], { photo: path })); toast('Looking good'); refresh(); }),
   mapTrip: a => { closeAll(); mapOpts.trip = a; mapOpts.year = 'All'; go('map'); setTimeout(() => drawMap(true), 120); },
-  replay: () => { closeAll(); startReplay(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
+  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
   deleteTrip: a => { if ((X().legsByTrip.get(a) || []).length || (X().staysByTrip.get(a) || []).length) return toast('Delete or move its flights, drives and stays first.', true); confirmDel('trips', a, 'this trip').then(() => closeAll()); },
   deleteLeg: a => confirmDel('legs', a, 'this flight or drive'), deleteStay: a => confirmDel('stays', a, 'this stay'), deleteStory: a => confirmDel('stories', a, 'this story'),
   deletePhoto: a => { const p = D().photos.find(x => x.id === a); confirmDel('photos', a, 'this photo', () => db.removeFile(p.path)); },
