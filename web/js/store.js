@@ -132,6 +132,7 @@ export const legEnds = l => {
   return [a, b];
 };
 export const isFlight = l => l.mode === 'Flight';
+export const groundCountries = l => isFlight(l) ? [] : [S.X.countryOf(l.from_place), S.X.countryOf(l.to_place)].filter(Boolean);
 export const tripMiles = id => sum(S.X.legsByTrip.get(id) || [], l => l.miles);
 export const has = (row, pid) => (row.people || []).includes(pid);
 
@@ -164,12 +165,14 @@ export function person(pid) {
   const flights = legs.filter(isFlight);
   const miles = sum(legs, l => l.miles), flightMiles = sum(flights, l => l.miles);
   const nightCountries = uniq(nights.map(n => n.country).filter(Boolean));
-  const legCountries = uniq(legs.flatMap(l => [X.countryOf(l.from_place), X.countryOf(l.to_place)]).filter(Boolean));
-  const visited = uniq(nightCountries.concat(legCountries));
+  // a country counts as visited only if you slept there or drove/took a train in or out;
+  // flight endpoints alone (layovers) are "airport only"
+  const visited = uniq(nightCountries.concat(legs.flatMap(groundCountries)));
+  const airportOnly = uniq(legs.filter(isFlight).flatMap(l => [X.countryOf(l.from_place), X.countryOf(l.to_place)]).filter(c => c && !visited.includes(c)));
   const states = uniq(nights.filter(n => n.country === 'United States').map(n => X.stateOf(n.place)).filter(Boolean));
   const P = {
     id: pid, legs, stays, homes, nights, homeNow, homeCountry, trips, flights, miles, flightMiles, roadMiles: miles - flightMiles,
-    visited, visitedAbroad: visited.filter(c => c !== homeCountry), sleptAbroad: nightCountries.filter(c => c !== homeCountry),
+    visited, airportOnly, visitedAbroad: visited.filter(c => c !== homeCountry), sleptAbroad: nightCountries.filter(c => c !== homeCountry),
     nightsAbroad: nights.filter(n => n.country && n.country !== homeCountry).length,
     states, states50: states.filter(s => s !== 'District of Columbia'),
     continents: uniq(visited.map(c => X.continent[c]).filter(Boolean)),
@@ -198,7 +201,7 @@ export function yearSlice(P, year) {
     trips: year === 'All' ? P.trips : P.trips.filter(t => yearOfTrip(t) === String(year)),
     byCountry: count(n => n.country), byState: count(n => n.country === 'United States' ? X.stateOf(n.place) : ''), byPlace: count(n => n.place),
     abroad: nights.filter(n => n.country && n.country !== P.homeCountry).length,
-    countries: uniq(nights.map(n => n.country).concat(legs.flatMap(l => [X.countryOf(l.from_place), X.countryOf(l.to_place)])).filter(Boolean)),
+    countries: uniq(nights.map(n => n.country).concat(legs.flatMap(groundCountries)).filter(Boolean)),
   };
 }
 export const yearOfTrip = t => String(t.start_date || '').slice(0, 4);
