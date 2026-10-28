@@ -1,0 +1,3 @@
+{ "name": "Miles Traveled", "short_name": "Miles", "start_url": "./", "display": "standalone",
+  "background_color": "#f5efe2", "theme_color": "#f5efe2",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }

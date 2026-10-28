@@ -1,0 +1,5 @@
+supabase/seed*.sql
+*.zip
+*.xlsx
+*.kml
+*.kmz
