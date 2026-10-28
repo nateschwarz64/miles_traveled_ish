@@ -1176,7 +1176,7 @@ function moreSheet() {
     <div class="card"><p class="small muted">Pick the files from your old AppSheet folders (Trips_Images, Legs_Images…). Each one is matched to its trip or leg by file name.</p><button class="btn small ghost" data-click="importLegacy">Choose photos</button></div>
     <div class="section"><h3>Add to your lists</h3></div>
     <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="newPlace">+ Place</button><button class="btn small ghost" data-click="newPerson">+ Person</button><button class="btn small ghost" data-click="newHome" data-arg="${esc(S.focus)}">+ Home</button></div>
-    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.2</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="exportJson">Download a backup</button><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>`;
+    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="exportJson">Download a backup</button><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>`;
   }, body => {
     const P = F(), upd = () => {
       const a = body.querySelector('#schFrom').value, b = body.querySelector('#schTo').value, c = body.querySelector('#schCountry').value;

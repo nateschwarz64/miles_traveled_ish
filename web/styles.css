@@ -75,7 +75,7 @@ h1 { font-size: 28px; } h2 { font-size: 22px; } h3 { font-size: 17px; }
 .badge { text-align: center; padding: 12px 8px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
 .badge .e { font-size: 30px; } .badge .n { font-weight: 700; font-size: 13px; } .badge .d { font-size: 11px; color: var(--muted); }
 .badge.locked { opacity: .35; filter: grayscale(1); }
-.seg { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 4px; }
 .seg button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
 .seg button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 input[type=text], input[type=email], input[type=date], input[type=number], input[type=search], input:not([type]), select, textarea {
