@@ -125,5 +125,5 @@ Mark someone as family only if they should see everything. Companions and teams 
 - **Emails are gone.** The Apps Script version planned automatic emails. This version shows passport warnings on the home page instead, and Wrapped replaces the yearly recap email. Emails can come back later with a small Supabase function.
 - **Stays can't overlap.** A person can only sleep in one place a night, so a stay that overlaps another for the same person is refused.
 - **Location lookups** for "I'm here" and new places use OpenStreetMap's free service.
-- **Backups:** Supabase keeps daily backups on paid plans. On the free plan, use **☰ → Download a backup** now and then.
+- **Backups:** Supabase keeps daily backups only on paid plans. On the free plan, use **☰ → Backups**: "Download data" (one .json file) and "Download photos (.zip)", and keep both somewhere safe. "Restore from backup" puts a data file back: missing rows return, matching rows go back to the backup version, and nothing newer is deleted. The home page reminds you when it has been 30 days. Never commit backups to this repo; it is public.
 - **The Apps Script version** in `travel-app/` is no longer needed.

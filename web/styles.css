@@ -186,6 +186,32 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px
 .replay.hidden { display: none; } .replay b { font-size: 20px; } .replay .s { color: #d8dbe0; font-size: 12px; }
 .replay button { border: 0; border-radius: 8px; padding: 8px 12px; background: var(--board-text); color: var(--board); font-weight: 700; cursor: pointer; }
 .leaflet-popup-content { font: 13px/1.4 Inter, -apple-system, Arial, sans-serif; }
+.replay.wwi { flex-direction: column; align-items: stretch; gap: 8px; }
+.wwi-top, .wwi-bottom { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wwi-top .grow { min-width: 0; } .wwi-top .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wwi-stat { text-align: right; } .wwi-stat b { font-size: 16px; }
+.wwi-bottom input[type=range] { flex: 1; min-width: 0; accent-color: #eda100; }
+@media (max-width: 520px) { .wwi-stat .s { font-size: 10px; } .wwi-stat b { font-size: 14px; } .replay.wwi b#wwDate { font-size: 16px; } }
+.wwi-pin span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #eda100; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(237,161,0,.7); animation: wwiPulse 1.4s infinite; }
+@keyframes wwiPulse { 70% { box-shadow: 0 0 0 16px rgba(237,161,0,0); } 100% { box-shadow: 0 0 0 0 rgba(237,161,0,0); } }
+@media (prefers-reduced-motion: reduce) { .wwi-pin span { animation: none; } }
+.fam-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 520px) { .fam-chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; } .replay .fam-chip { flex: none; } }
+.replay .fam-chip { background: transparent; color: var(--board-text); border: 2px solid var(--c); padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; }
+.replay .fam-chip.on { background: var(--c); color: #fff; }
+.cross-star { color: #eda100; font-size: 18px; line-height: 18px; text-align: center; text-shadow: 0 0 3px #000, 0 0 6px rgba(0,0,0,.5); }
+.fly-canvas { position: absolute; inset: 0; }
+.fly-title { position: absolute; top: 0; left: 0; right: 0; padding: 16px 56px 28px 16px; z-index: 2; display: flex; flex-direction: column; gap: 2px; font-family: var(--mono);
+  background: linear-gradient(rgba(13,16,24,.85), rgba(13,16,24,0)); pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.fly-title b { font-size: 18px; } .fly-title span { font-size: 12px; opacity: .8; }
+.fly-hud { display: flex; gap: 14px; font: 13px var(--mono); color: #f3d36b; margin-top: 4px; } .fly-hud b { font-size: 13px; }
+.fly-card .fly-done { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.6); }
+.fly-card { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 2; width: min(340px, calc(100% - 32px)); background: rgba(13,16,24,.86); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 14px; padding: 12px 14px; text-align: center; animation: wslide .4s ease; backdrop-filter: blur(4px); }
+.fly-card.hidden { display: none; } .fly-card b { font-size: 22px; display: block; } .fly-card .s { font-size: 13px; opacity: .8; } .fly-card p { font-family: var(--serif); margin: 8px 0 0; }
+.fly-card .k { font: 600 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: .7; margin-bottom: 4px; }
+.fly-card .polaroid { margin: 0 auto 8px; max-width: 160px; }
+.fly-stats { display: flex; justify-content: space-around; margin-top: 10px; } .fly-stats b { font-size: 24px; color: #f3d36b; } .fly-stats span { font-size: 12px; opacity: .8; }
 .plane-icon { font-size: 18px; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
 
 /* forms */

@@ -161,6 +161,7 @@ function renderHome() {
     <button class="hero" data-click="imHere"><b>📍 I'm here</b><span>Log tonight's place from your location${P.current ? ' · ' + esc(P.current.name) : ''}</span></button>
     <div class="cta">
       <button data-click="replay"><b>▶ Replay my travels</b><span>Every flight and drive, in order, on the map</span></button>
+      <button data-click="whereWasI"><b>🕰 Where was I?</b><span>Every night since ${esc(yearOf(P.nights[0] && P.nights[0].d) || 'the start')}, on a time slider</span></button>
       <button data-click="wrapped" data-arg="${lastYear}"><b>✨ ${lastYear} Wrapped</b><span>Your year, one tap at a time</span></button>
     </div>
     ${P.current ? `<div class="section"><h2>On a trip right now</h2></div>${tripCard(P.current)}` : ''}
@@ -181,6 +182,8 @@ function routeLines(legs) { return legs.map(legEnds).filter(([a, b]) => a && b).
 
 function homeAlerts(P) {
   const out = [], today = S.today;
+  const lb = lastBackup();
+  if (db.kind !== 'local' && (!lb || daysBetween(lb, today) > 30)) out.push({ html: `<b>💾 Time for a backup</b><div class="small">${lb ? 'Last one was ' + daysBetween(lb, today) + ' days ago' : 'No backup on this device yet'}. Tap to download your data.</div>`, click: 'exportJson' });
   D().documents.filter(d => d.person_id === S.focus && isDate(d.expires)).forEach(d => {
     const left = daysBetween(today, d.expires);
     if (left <= 180) out.push({ html: `<b>🛂 ${esc(d.type || 'Document')} ${left < 0 ? 'expired' : 'expires in ' + left + ' days'}</b><div class="small">${esc(d.name || '')} · ${niceDate(d.expires)}</div>`, click: 'more' });
@@ -324,12 +327,12 @@ function tripHtml(id) {
     ${t.notes ? `<p class="small muted">${esc(t.notes)}</p>` : ''}
     <div class="row wrap" style="gap:8px;margin:12px 0">
       <button class="btn small" data-click="editTrip" data-arg="${esc(id)}">Edit</button><button class="btn small ghost" data-click="newLeg" data-arg="${esc(id)}">+ Flight/drive</button>
-      <button class="btn small ghost" data-click="newStay" data-arg="${esc(id)}">+ Stay</button><button class="btn small ghost" data-click="newStory" data-arg="${esc(id)}">+ Story</button>
+      <button class="btn small ghost" data-click="newStay" data-arg="${esc(id)}">+ Stay</button><button class="btn small ghost" data-click="newStory" data-arg="${esc(id)}">+ Story</button><button class="btn small gold" data-click="flyover" data-arg="${esc(id)}">🎬 Fly this trip</button>
       <button class="btn small ghost" data-click="addPhotos" data-arg="${esc(id)}">+ Photos</button><button class="btn small ghost" data-click="mapTrip" data-arg="${esc(id)}">Big map</button></div>
     ${stories.length ? `<div class="section"><h3>Stories</h3></div>${stories.map(s => storyCard(s)).join('')}` : ''}
     ${photos.length ? `<div class="section"><h3>Photos</h3></div>${photoGrid(photos)}` : ''}
     <div class="section"><h3>Flights and drives (${legs.length})</h3></div>
-    <div class="card list">${legs.map(l => `<div class="item"><div class="grow"><div class="t">${l.mode === 'Flight' ? '✈︎' : l.mode === 'Train' ? '🚆' : l.mode === 'Boat' ? '⛴' : '🚗'} ${esc(l.name || (l.from_place + ' → ' + l.to_place))}${l.class === 'First' ? ' <span class="chip gold">First</span>' : ''}</div>
+    <div class="card list">${legs.map(l => `<div class="item"><div class="grow"><div class="t">${l.mode === 'Flight' ? '✈︎' : l.mode === 'Train' ? '🚆' : l.mode === 'Boat' ? '⛴' : l.mode === 'Hike' ? '🥾' : '🚗'} ${esc(l.name || (l.from_place + ' → ' + l.to_place))}${l.class === 'First' ? ' <span class="chip gold">First</span>' : ''}</div>
       <div class="s">${niceDate(l.date) || 'no date'} · ${l.miles ? fmt(l.miles) + ' mi' : 'no miles'}${l.same_day ? ' · day trip' : ''}</div></div>${faces((l.people || []).filter(p => p !== S.focus), 20, 3)}
       <button class="icon" title="Return trip" data-click="returnLeg" data-arg="${esc(l.id)}">⇄</button><button class="icon" title="Edit" data-click="editLeg" data-arg="${esc(l.id)}">✎</button></div>`).join('') || '<div class="empty">None yet</div>'}</div>
     <div class="section"><h3>Where you slept (${stays.length})</h3></div>
@@ -423,7 +426,7 @@ function tripForm(id) {
   });
 }
 function readRow(r) { const o = {}; r.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); return o; }
-const legRowHtml = () => `<div class="leg-row"><select data-k="mode"><option>Flight</option><option>Car</option><option>Train</option><option>Bus</option><option>Boat</option></select>
+const legRowHtml = () => `<div class="leg-row"><select data-k="mode"><option>Flight</option><option>Car</option><option>Train</option><option>Bus</option><option>Boat</option><option>Hike</option></select>
   <input type="date" data-k="date"><input data-k="from" list="airportsList" placeholder="From: airport code or place"><input data-k="to" list="airportsList" placeholder="To"><input type="number" data-k="miles" placeholder="Miles (auto)"><button type="button" class="btn small ghost" data-click="removeRow">Remove</button></div>`;
 const stayRowHtml = () => `<div class="leg-row"><input data-k="place" list="placesList" placeholder="Place" style="grid-column:1/-1"><input type="date" data-k="arrive" title="First night"><input type="date" data-k="leave" title="Morning you left"><input type="number" data-k="cost" placeholder="Cost ($)"><button type="button" class="btn small ghost" data-click="removeRow">Remove</button></div>`;
 function endpoint(v, mode) {
@@ -446,7 +449,7 @@ function legForm({ id, trip, prefill, title } = {}) {
   const l = id ? D().legs.find(x => x.id === id) : Object.assign({ mode: 'Flight', trip_id: trip || (F().current || {}).id || '', date: S.today, people: trip ? tripPeople(trip).filter(p => P0(p).kind !== 'group') : [S.focus] }, prefill || {});
   if (!l.people || !l.people.length) l.people = [S.focus];
   openSheet(id ? 'Edit flight or drive' : (title || 'New flight or drive'), `${datalists()}<form id="legF">
-    <div class="two">${field({ k: 'mode', label: 'How', type: 'select', options: ['Flight', 'Car', 'Train', 'Bus', 'Boat'], value: l.mode })}${field({ k: 'trip_id', label: 'Trip', type: 'select', options: tripOptions(), value: l.trip_id })}</div>
+    <div class="two">${field({ k: 'mode', label: 'How', type: 'select', options: ['Flight', 'Car', 'Train', 'Bus', 'Boat', 'Hike'], value: l.mode })}${field({ k: 'trip_id', label: 'Trip', type: 'select', options: tripOptions(), value: l.trip_id })}</div>
     <div id="flightBits"><button type="button" class="btn small ghost" style="margin-top:10px" data-click="scanPass">📷 Scan a boarding pass</button>
       <div class="two">${field({ k: 'from_airport', label: 'From airport', value: l.from_airport, list: 'airportsList', ph: 'DEN' })}${field({ k: 'to_airport', label: 'To airport', value: l.to_airport, list: 'airportsList', ph: 'LGW' })}</div><div class="tiny muted" id="apHint"></div></div>
     <div class="two">${field({ k: 'from_place', label: 'From place', value: l.from_place, list: 'placesList' })}${field({ k: 'to_place', label: 'To place', value: l.to_place, list: 'placesList', hint: placeHint })}</div>
@@ -823,6 +826,8 @@ function renderStats() {
   el.innerHTML = `<h1>${y === 'All' ? esc(me.name) + "'s stats" : esc(y) + ' in review'}</h1>
     <div class="seg" style="margin:8px 0 12px">${['All'].concat(years).map(v => `<button class="${y === v ? 'on' : ''}" data-click="statsYear" data-arg="${v}">${v === 'All' ? 'All time' : v}</button>`).join('')}</div>
     <div class="grid">${statCard(fmt(Y.miles), 'miles')}${statCard(Y.flights.length, 'flights')}${statCard(Y.trips.length, 'trips')}${statCard(Y.countries.length, y === 'All' && P.airportOnly.length ? `countries visited (+${P.airportOnly.length} airport only)` : 'countries visited')}${statCard(fmt(Y.abroad), 'nights abroad')}${statCard(Y.byState.length, 'US states slept in')}
+      ${y === 'All' ? statCard(fmt1(P.daysAbroad / 7), `weeks abroad (${fmt1(P.daysAbroad / 365.25)} years)`) : ''}
+      ${y === 'All' && P.homeAirport ? statCard(P.homeAirportFlights, `flights in/out of ${esc(P.homeAirport)}`) : ''}
       ${y === 'All' && cost ? statCard('$' + fmt(cost), 'logged costs') : ''}</div>
     ${y !== 'All' ? `<button class="btn gold" style="width:100%;margin-top:12px" data-click="wrapped" data-arg="${esc(y)}">✨ Play ${esc(y)} Wrapped</button>` : ''}
     ${y === 'All' ? `
@@ -1007,6 +1012,79 @@ function wrapped(year) {
   box.classList.remove('hidden'); show(0);
 }
 
+// Trip flyover: a globe whose camera follows each flight and drive with a little plane, zooming in for
+// short hops, and a postcard for every place you slept. Ends on a summary card.
+async function flyover(id) {
+  const t = X().trip[id]; if (!t) return;
+  const legs = (X().legsByTrip.get(id) || []).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1])
+    .sort((a, b) => String(a.l.date) < String(b.l.date) ? -1 : String(a.l.date) > String(b.l.date) ? 1 : String(a.l.id).localeCompare(String(b.l.id), undefined, { numeric: true }));
+  const stays = (X().staysByTrip.get(id) || []).filter(s => X().ll[s.place]).sort((a, b) => a.arrive < b.arrive ? -1 : 1);
+  if (!legs.length && !stays.length) return toast('Add flights, drives or stays to fly this trip.', true);
+  // one timeline: on the same day the leg comes before the stay it lands at
+  const ev = legs.map(x => ({ kind: 'leg', d: x.l.date || '', ...x })).concat(stays.map(s => ({ kind: 'stay', d: s.arrive, s })))
+    .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : a.kind === b.kind ? 0 : a.kind === 'leg' ? -1 : 1);
+  const box = $('#wrapped'); box.classList.remove('hidden');
+  box.style.background = 'radial-gradient(120% 90% at 20% 10%, #1f2a44, #0d1018)';
+  box.innerHTML = `<button class="icon x" data-w="close">✕</button><div class="fly-title"><b>${esc(t.name)}</b><div class="fly-hud"><span id="flyDate">${t.start_date ? niceDate(t.start_date) : ''}</span><span><b id="flyMiles">0</b> mi</span></div></div>
+    <canvas class="fly-canvas"></canvas><div class="fly-card hidden"></div>`;
+  const st = { stop: false };
+  box.onclick = e => { if (e.target.closest('[data-w=close]')) { st.stop = true; box.classList.add('hidden'); box.onclick = null; } else if (e.target.closest('[data-w=again]')) { st.stop = true; flyover(id); } };
+  let land = null, borders = null;
+  try { const topo = await cachedJson(CDN.world110); land = topojson.feature(topo, topo.objects.land); borders = topojson.mesh(topo, topo.objects.countries, (a, b) => a !== b); } catch (e) { /* draw without land */ }
+  const canvas = box.querySelector('canvas'), dpr = window.devicePixelRatio || 1, W = box.clientWidth, H = box.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const R = Math.min(W, H) * .42, proj = d3.geoOrthographic().translate([W / 2, H / 2]).clipAngle(90).precision(.3), path = d3.geoPath(proj, ctx);
+  const lonlat = ll => [ll[1], ll[0]], done = [], dots = [];
+  let cam = lonlat((legs[0] || { e: [X().ll[stays[0].place]] }).e[0]), zoom = 1, plane = null, miles = 0;
+  const zoomFor = (a, b) => Math.max(1, Math.min(40, .9 / (d3.geoDistance(a, b) + .02)));
+  const draw = () => {
+    proj.rotate([-cam[0], -cam[1]]).scale(R * zoom);
+    ctx.clearRect(0, 0, W, H);
+    ctx.beginPath(); path({ type: 'Sphere' }); ctx.fillStyle = '#2b5aa8'; ctx.fill();
+    ctx.beginPath(); path(d3.geoGraticule10()); ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = .6; ctx.stroke();
+    if (land) { ctx.beginPath(); path(land); ctx.fillStyle = '#f3d36b'; ctx.fill(); }
+    if (borders) { ctx.beginPath(); path(borders); ctx.strokeStyle = 'rgba(120,90,20,.45)'; ctx.lineWidth = .6; ctx.stroke(); }
+    done.forEach(x => { ctx.beginPath(); path({ type: 'LineString', coordinates: x.pts }); ctx.setLineDash(x.flight ? [5, 4] : []); ctx.strokeStyle = x.flight ? '#ffffff' : '#c8402f'; ctx.lineWidth = 2.2; ctx.stroke(); });
+    ctx.setLineDash([]);
+    dots.forEach(c => { if (d3.geoDistance(c, cam) > Math.PI / 2) return; const p = proj(c); ctx.beginPath(); ctx.arc(p[0], p[1], 4.5, 0, 7); ctx.fillStyle = '#c8402f'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); });
+    if (plane && d3.geoDistance(plane.at, cam) < Math.PI / 2) { const p = proj(plane.at); ctx.font = '22px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(plane.icon, p[0], p[1]); }
+  };
+  const anim = (ms, f) => new Promise(res => { const t0 = performance.now(); const step = now => { if (st.stop) return res(); const k = Math.min(1, (now - t0) / ms); f(k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2); draw(); if (k < 1) requestAnimationFrame(step); else res(); }; requestAnimationFrame(step); });
+  const wait = ms => new Promise(res => setTimeout(res, ms));
+  const card = box.querySelector('.fly-card'), hud = k => { $('#flyMiles').textContent = fmt(miles); if (k) $('#flyDate').textContent = niceDate(k); };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const x of ev) {
+    if (st.stop) return;
+    if (x.kind === 'leg') {
+      const a = lonlat(x.e[0]), b = lonlat(x.e[1]), flight = isFlight(x.l), gi = d3.geoInterpolate(a, b), z1 = zoomFor(a, b), cam0 = cam, z0 = zoom, ci = d3.geoInterpolate(cam0, a);
+      hud(x.l.date); card.classList.add('hidden');
+      if (!reduce) await anim(700, k => { cam = ci(k); zoom = z0 + (z1 - z0) * k; });
+      const line = { flight, pts: [a] }; done.push(line); const m0 = miles;
+      const ms = reduce ? 0 : Math.max(900, Math.min(3600, 500 + Math.sqrt(num(x.l.miles)) * 35));
+      plane = { flight, at: a, icon: flight ? '✈️' : ({ Train: '🚆', Boat: '⛴', Bus: '🚌', Hike: '🥾' })[x.l.mode] || '🚗' };
+      if (ms) await anim(ms, k => { const c = gi(k); cam = c; plane.at = c; line.pts = d3.range(0, k + 1e-9, Math.max(k / 40, .001)).map(gi).concat([c]); miles = m0 + num(x.l.miles) * k; hud(); });
+      line.pts = d3.range(0, 1.0001, .025).map(gi); miles = m0 + num(x.l.miles); cam = b; plane = null; hud(); draw();
+    } else {
+      const s = x.s, c = lonlat(X().ll[s.place]), n = daysBetween(s.arrive, s.leave);
+      if (!dots.some(d => d[0] === c[0] && d[1] === c[1])) dots.push(c);
+      if (!reduce && d3.geoDistance(c, cam) > .001) { const ci = d3.geoInterpolate(cam, c); await anim(600, k => { cam = ci(k); }); }
+      hud(s.arrive); draw();
+      const story = D().stories.find(r => r.stay_id === s.id) || D().stories.find(r => r.trip_id === id && r.place === s.place);
+      const ph = D().photos.find(p => p.stay_id === s.id) || D().photos.find(p => p.trip_id === id && p.place === s.place);
+      card.innerHTML = `${ph ? `<div class="polaroid">${img(ph.path)}</div>` : ''}<div class="k">${niceDate(s.arrive)}</div><b>${esc(s.place.split(',')[0])}</b><div class="s">${esc(s.place.split(',').slice(1).join(',').trim())} · ${n} night${n === 1 ? '' : 's'}${s.confidence === 'In transit' ? ' · in transit' : ''}</div>${story ? `<p>${esc(story.title || String(story.body || '').slice(0, 90))}</p>` : ''}`;
+      hydrateImages(card); card.classList.remove('hidden');
+      await wait(reduce ? 0 : 1700 + (story || ph ? 1200 : 0));
+    }
+  }
+  if (st.stop) return;
+  plane = null;
+  if (!reduce) { const b = done.flatMap(l => l.pts).concat(dots); if (b.length) { const ctr = d3.geoCentroid({ type: 'MultiPoint', coordinates: b }), ci = d3.geoInterpolate(cam, ctr), z0 = zoom; await anim(1200, k => { cam = ci(k); zoom = z0 + (1 - z0) * k; }); } }
+  const nightsN = sum(stays, s => daysBetween(s.arrive, s.leave)), cs = tripCountries(id);
+  card.innerHTML = `<div class="k">The whole trip</div><b>${esc(t.name)}</b><div class="fly-stats"><div><b>${fmt(miles)}</b><span>miles</span></div><div><b>${fmt(nightsN)}</b><span>nights</span></div><div><b>${cs.length}</b><span>countr${cs.length === 1 ? 'y' : 'ies'}</span></div></div><div class="row" style="gap:8px;justify-content:center;margin-top:10px"><button class="btn small gold" data-w="again">↻ Again</button><button class="btn small fly-done" data-w="close">Done</button></div>`;
+  card.classList.remove('hidden'); card.classList.add('end');
+}
+
 // ------------------------------------------------------------------ MAP
 const mapOpts = { slept: true, routes: true, countries: false, states: false, year: 'All', trip: '', earth: {}, panelOpen: innerWidth > 640 };
 function renderMap() {
@@ -1016,6 +1094,8 @@ function renderMap() {
   panel.className = 'map-panel' + (mapOpts.panelOpen ? '' : ' min');
   panel.innerHTML = `<div class="row between"><b>Layers</b><button class="icon small" data-click="mapPanel">${mapOpts.panelOpen ? '–' : '☰'}</button></div><div class="body">
     <button class="btn small gold" style="width:100%;margin:6px 0" data-click="replay">▶ Replay ${esc(P0(S.focus).name)}'s travels</button>
+    <button class="btn small ghost" style="width:100%;margin:0 0 6px" data-click="whereWasI">🕰 Where was I?</button>
+    <button class="btn small ghost" style="width:100%;margin:0 0 6px" data-click="familyPaths">👨‍👩‍👧 Family paths</button>
     <label><input type="checkbox" data-map="slept" ${mapOpts.slept ? 'checked' : ''}> Where I slept</label>
     <label><input type="checkbox" data-map="routes" ${mapOpts.routes ? 'checked' : ''}> Flights and drives</label>
     <label><input type="checkbox" data-map="countries" ${mapOpts.countries ? 'checked' : ''}> Countries by nights</label>
@@ -1136,7 +1216,137 @@ function startReplay() {
   nextLeg();
   mapLayers.replay = g;
 }
-function stopReplay() { if (replayState) { replayState.stop = true; replayState = null; } const b = $('#replayBar'); if (b) b.classList.add('hidden'); }
+// "Where was I?": scrub or play through every night since the first one. A glowing pin sits where you slept,
+// a trail shows the last few places, dots light up as you first reach them, and the counters keep score.
+function startWhereWasI() {
+  if (UI.page !== 'map') { go('map'); setTimeout(startWhereWasI, 300); return; }
+  stopReplay();
+  const P = F(), nights = P.nights.filter(n => X().ll[n.place]);
+  if (!nights.length) return toast('No nights logged yet.', true);
+  Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
+  // running totals as of each night
+  const legs = P.legs.filter(l => isDate(l.date)).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const seen = new Set(), tot = [], changes = [], first = {};
+  let li = 0, miles = 0, abroad = 0;
+  nights.forEach((n, i) => {
+    while (li < legs.length && legs[li].date <= n.d) { miles += num(legs[li].miles); groundCountries(legs[li]).forEach(c => seen.add(c)); li++; }
+    if (n.country) seen.add(n.country);
+    if (n.country && n.country !== P.homeCountry) abroad++;
+    tot.push({ miles, abroad, countries: [...seen].filter(c => c !== P.homeCountry).length });
+    if (!i || n.place !== nights[i - 1].place) changes.push(i);
+    if (first[n.place] === undefined) first[n.place] = i;
+  });
+  const g = L.featureGroup().addTo(map);
+  const dots = Object.keys(first).map(p => ({ p, i: first[p], on: null, m: L.circleMarker(X().ll[p], { radius: 4, color: '#fff', weight: 1, fillColor: '#eda100', fillOpacity: 1 }).bindTooltip(esc(p)) }));
+  const trail = L.polyline([], { color: '#eda100', weight: 2.5, opacity: .8 }).addTo(g);
+  const pin = L.marker(X().ll[nights[0].place], { icon: L.divIcon({ className: 'wwi-pin', html: '<span></span>', iconSize: [18, 18] }), zIndexOffset: 1000 }).addTo(g);
+  map.fitBounds(L.latLngBounds(dots.map(d => X().ll[d.p])).pad(.1));
+  const bar = $('#replayBar'); bar.classList.remove('hidden'); bar.classList.add('wwi');
+  bar.innerHTML = `<div class="wwi-top"><div class="grow"><b id="wwDate">—</b><div class="s" id="wwSub"></div></div>
+      <div class="wwi-stat"><b id="wwAbroad">0</b><div class="s">nights abroad</div></div><div class="wwi-stat"><b id="wwCountries">0</b><div class="s">countries</div></div><div class="wwi-stat"><b id="wwMiles">0</b><div class="s">miles</div></div></div>
+    <div class="wwi-bottom"><button id="wwPlay">▶</button><input id="wwRange" type="range" min="0" max="${nights.length - 1}" value="0" aria-label="Date"><button id="wwSpeed">1×</button><button id="wwStop">■</button></div>`;
+  const st = replayState = { stop: false, speed: 1, playing: false, pos: 0, last: -1 };
+  const show = i => {
+    if (i === st.last) return;
+    const n = nights[i], t = tot[i], ll = X().ll[n.place], moved = st.last < 0 || nights[st.last].place !== n.place;
+    st.last = i;
+    pin.setLatLng(ll);
+    dots.forEach(d => { const on = d.i <= i; if (on !== d.on) { d.on = on; on ? d.m.addTo(g) : g.removeLayer(d.m); } });
+    // trail through the last 12 places, found from the list of nights where the place changed
+    let lo = 0, hi = changes.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (changes[mid] <= i) lo = mid; else hi = mid - 1; }
+    trail.setLatLngs(changes.slice(Math.max(0, lo - 11), lo + 1).map(k => X().ll[nights[k].place]));
+    $('#wwDate').textContent = niceDate(n.d);
+    const trip = n.trip && X().trip[n.trip];
+    $('#wwSub').textContent = `${n.place}${n.away ? (trip ? ' · ' + trip.name : '') : ' · home'}${n.transit ? ' · in transit' : ''}`;
+    $('#wwAbroad').textContent = fmt(t.abroad); $('#wwCountries').textContent = t.countries; $('#wwMiles').textContent = fmt(t.miles);
+    $('#wwRange').value = i;
+    if (moved && !map.getBounds().pad(-.1).contains(ll)) map.panTo(ll, { animate: true, duration: .6 });
+  };
+  const play = on => { st.playing = on; $('#wwPlay').textContent = on ? '❚❚' : '▶'; if (on) { st.t = performance.now(); requestAnimationFrame(tick); } };
+  // nights per second: trips play slowly enough to follow, long stretches at home fly by
+  const tick = t => {
+    if (st.stop || !st.playing) return;
+    const dt = Math.min(.1, (t - st.t) / 1000); st.t = t;
+    const n = nights[Math.floor(st.pos)];
+    st.pos += dt * st.speed * (n.away ? 5 : 60);
+    if (st.pos >= nights.length - 1) { st.pos = nights.length - 1; show(st.pos); play(false); return; }
+    show(Math.floor(st.pos));
+    requestAnimationFrame(tick);
+  };
+  $('#wwRange').oninput = e => { st.pos = +e.target.value; show(st.pos); };
+  $('#wwPlay').onclick = () => { if (st.pos >= nights.length - 1) st.pos = 0; play(!st.playing); };
+  $('#wwSpeed').onclick = () => { st.speed = st.speed === 1 ? 4 : st.speed === 4 ? 16 : 1; $('#wwSpeed').textContent = st.speed + '×'; };
+  $('#wwStop').onclick = () => { stopReplay(); drawMap(); };
+  show(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play(true);
+  mapLayers.replay = g;
+}
+// Family paths: everyone's flights and drives in their own color, with a star wherever two or more of
+// them slept in the same place on the same night (away from a shared home) or rode the same leg.
+const familyPicked = new Set();
+function startFamilyPaths() {
+  if (UI.page !== 'map') { go('map'); setTimeout(startFamilyPaths, 300); return; }
+  stopReplay();
+  const people = D().people.filter(p => p.kind !== 'group').map(p => ({ p, P: person(p.id) })).filter(x => x.P.legs.length || x.P.stays.length)
+    .sort((a, b) => (b.p.id === S.focus) - (a.p.id === S.focus) || b.P.legs.length - a.P.legs.length);
+  if (people.length < 2) return toast('Tag people on flights, drives or stays to see their paths here.', true);
+  if (!familyPicked.size) {
+    // start with you, your family profiles, and the three people you've traveled with most
+    const me = people.find(x => x.p.id === S.focus), shared = x => me ? me.P.legs.filter(l => has(l, x.p.id)).length : 0;
+    people.filter(x => x.p.id === S.focus || x.p.kind === 'family').forEach(x => familyPicked.add(x.p.id));
+    people.filter(x => !familyPicked.has(x.p.id)).sort((a, b) => shared(b) - shared(a)).slice(0, 3).forEach(x => familyPicked.add(x.p.id));
+  }
+  const bar = $('#replayBar'); bar.classList.remove('hidden'); bar.classList.add('wwi');
+  const st = replayState = { stop: false };
+  const draw = () => {
+    if (st.stop) return;
+    Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
+    const on = people.filter(x => familyPicked.has(x.p.id)), g = L.featureGroup().addTo(map);
+    // wider lines first, so a leg two people shared shows as stacked stripes
+    on.forEach((x, k) => {
+      const col = personColor(x.p), w = 2 + (on.length - 1 - k) * 1.5;
+      x.P.legs.forEach(l => {
+        const [a, b] = legEnds(l); if (!a || !b || (a[0] === b[0] && a[1] === b[1])) return;
+        L.polyline(isFlight(l) ? arc(a, b) : [a, b], { color: col, weight: w, opacity: .75 }).bindTooltip(`${esc(x.p.name)}: ${esc(l.name || '')} · ${niceDate(l.date)}`).addTo(g);
+      });
+    });
+    // crossings: same place, same night, at least one of them away from home; runs of nights merge into one star
+    const byNight = {};
+    on.forEach(x => x.P.nights.forEach(n => { if (!n.transit) (byNight[n.d + '|' + n.place] = byNight[n.d + '|' + n.place] || []).push({ id: x.p.id, away: n.away }); }));
+    const runs = [];
+    Object.keys(byNight).sort().forEach(k => {
+      const who = byNight[k]; if (who.length < 2 || !who.some(w => w.away)) return;
+      const [d, place] = k.split('|'), ids = who.map(w => w.id).sort().join(',');
+      const last = runs.find(r => r.place === place && r.ids === ids && addDays(r.to, 1) === d);
+      if (last) { last.to = d; last.n++; } else runs.push({ place, ids, from: d, to: d, n: 1 });
+    });
+    // legs ridden together, one star per trip and group of people
+    const together = {};
+    on.forEach(x => x.P.legs.forEach(l => {
+      const ids = on.filter(y => has(l, y.p.id)).map(y => y.p.id).sort(); if (ids.length < 2) return;
+      const k = (l.trip_id || l.id) + '|' + ids.join(','), t = together[k] = together[k] || { ids: ids.join(','), legs: new Set(), trip: X().trip[l.trip_id] };
+      t.legs.add(l);
+    }));
+    Object.values(together).forEach(t => {
+      const legs = [...t.legs], ds = legs.map(l => l.date).filter(isDate).sort();
+      runs.push({ place: (t.trip && X().ll[t.trip.place] ? t.trip.place : legs[legs.length - 1].to_place), ids: t.ids, from: ds[0], to: ds[ds.length - 1], n: 0, together: `${t.trip ? esc(t.trip.name) : 'the road'} (${legs.length} flight${legs.length === 1 ? '' : 's'} and drives together)` });
+    });
+    runs.forEach(r => {
+      const ll = X().ll[r.place]; if (!ll) return;
+      const names = r.ids.split(',').map(id => esc(P0(id).name)).join(' + ');
+      L.marker(ll, { icon: L.divIcon({ className: 'cross-star', html: '★', iconSize: [18, 18] }), zIndexOffset: 500 })
+        .bindPopup(`<b>${names}</b><br>${r.together ? 'Traveled together: ' + r.together : esc(r.place)}<br>${r.from ? niceDate(r.from) : ''}${r.to && r.to !== r.from ? ' – ' + niceDate(r.to) : ''}${r.n ? ` · ${r.n} night${r.n === 1 ? '' : 's'}` : ''}`).addTo(g);
+    });
+    mapLayers.family = g;
+    bar.innerHTML = `<div class="wwi-top"><div class="grow"><b>Family paths</b><div class="s">★ ${runs.length} time${runs.length === 1 ? '' : 's'} your paths crossed</div></div><button id="fpStop">■</button></div>
+      <div class="fam-chips">${people.map(x => `<button class="fam-chip ${familyPicked.has(x.p.id) ? 'on' : ''}" data-fp="${esc(x.p.id)}" style="--c:${personColor(x.p)}">${esc(x.p.name)}</button>`).join('')}</div>`;
+    bar.querySelectorAll('[data-fp]').forEach(btn => btn.onclick = () => { const id = btn.dataset.fp; familyPicked.has(id) ? familyPicked.delete(id) : familyPicked.add(id); draw(); });
+    $('#fpStop').onclick = () => { stopReplay(); drawMap(); };
+    const b = g.getBounds(); if (b.isValid()) map.fitBounds(b, { paddingTopLeft: [20, 20], paddingBottomRight: [20, bar.offsetHeight + 24] });
+  };
+  draw();
+}
+function stopReplay() { if (replayState) { replayState.stop = true; replayState = null; } const b = $('#replayBar'); if (b) { b.classList.add('hidden'); b.classList.remove('wwi'); } }
 
 // ------------------------------------------------------------------ MORE (planning and tools)
 function missingInfo() {
@@ -1176,7 +1386,10 @@ function moreSheet() {
     <div class="card"><p class="small muted">Pick the files from your old AppSheet folders (Trips_Images, Legs_Images…). Each one is matched to its trip or leg by file name.</p><button class="btn small ghost" data-click="importLegacy">Choose photos</button></div>
     <div class="section"><h3>Add to your lists</h3></div>
     <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="newPlace">+ Place</button><button class="btn small ghost" data-click="newPerson">+ Person</button><button class="btn small ghost" data-click="newHome" data-arg="${esc(S.focus)}">+ Home</button></div>
-    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="exportJson">Download a backup</button><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>`;
+    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>
+    <div class="section"><h3>Backups</h3><span class="kicker">${lastBackup() ? 'last one ' + niceDate(lastBackup()) : 'none on this device yet'}</span></div>
+    <div class="card"><p class="small muted">The data file has every trip, flight, stay, place, person and story. Photos come as a separate .zip. Keep both somewhere safe, like Google Drive. Restoring adds back anything missing and puts matching rows back to the backup's version; anything added since stays.</p>
+      <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="exportJson">Download data</button><button class="btn small ghost" data-click="exportPhotos">Download photos (.zip)</button><button class="btn small ghost" data-click="restoreBackup">Restore from backup</button></div></div>`;
   }, body => {
     const P = F(), upd = () => {
       const a = body.querySelector('#schFrom').value, b = body.querySelector('#schTo').value, c = body.querySelector('#schCountry').value;
@@ -1244,6 +1457,38 @@ async function importKml(file) {
   toast(`${pins.length} pins: ${pins.filter(p => p.place).length} matched to places, ${pins.filter(p => p.trip_id).length} to trips`);
   refresh();
 }
+// ------------------------------------------------------------------ backups
+const BACKUP_KEY = 'mt-last-backup';
+function lastBackup() { try { return localStorage.getItem(BACKUP_KEY) || ''; } catch (e) { return ''; } }
+function setLastBackup() { try { localStorage.setItem(BACKUP_KEY, S.today); } catch (e) { /* private mode: no reminder, nothing else breaks */ } }
+function downloadBlob(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
+async function exportPhotos() {
+  const paths = uniq(['photos', 'people', 'trips', 'legs'].flatMap(t => D()[t].map(r => t === 'photos' ? r.path : r.photo)).filter(Boolean));
+  if (!paths.length) return toast('No photos yet.');
+  const zip = new JSZip(); let done = 0, missing = 0;
+  for (let i = 0; i < paths.length; i += 50) {
+    const batch = paths.slice(i, i + 50), urls = await db.sign(batch);
+    await Promise.all(batch.map(async p => {
+      try { if (!urls[p]) throw 0; const r = await fetch(urls[p]); if (!r.ok) throw 0; zip.file(p, await r.blob()); } catch (e) { missing++; }
+      if (++done % 25 === 0) toast(`Zipping photos… ${done} of ${paths.length}`);
+    }));
+  }
+  downloadBlob(await zip.generateAsync({ type: 'blob' }), `miles-traveled-photos-${S.today}.zip`);
+  toast(`Saved ${paths.length - missing} photos${missing ? ` (${missing} could not be found)` : ''}.`);
+}
+// parents before children, so every reference already exists when a row lands
+const RESTORE_ORDER = ['countries', 'people', 'places', 'airports', 'trips', 'legs', 'stays', 'stories', 'photos', 'documents', 'wishes', 'packing', 'packing_checks', 'homes', 'layers', 'pins'];
+async function restoreBackup(file) {
+  let data; try { data = JSON.parse(await file.text()); } catch (e) { throw new Error('That file is not a Miles Traveled backup.'); }
+  if (!data || !Array.isArray(data.trips) || !Array.isArray(data.legs)) throw new Error('That file is not a Miles Traveled backup.');
+  const n = RESTORE_ORDER.reduce((a, t) => a + (Array.isArray(data[t]) ? data[t].length : 0), 0);
+  if (!confirm(`Restore ${fmt(n)} rows from ${file.name}? Anything missing comes back, and matching rows go back to the backup's version. Nothing added since gets deleted.`)) return;
+  for (const t of RESTORE_ORDER) {
+    const rows = Array.isArray(data[t]) ? data[t] : [];
+    for (let i = 0; i < rows.length; i += 500) { toast(`Restoring ${t}…`); await db.upsertMany(t, rows.slice(i, i + 500)); }
+  }
+  await load(); refresh(); toast(`Restored ${fmt(n)} rows.`);
+}
 async function importLegacy(files) {
   const base = s => String(s || '').split('/').pop().toLowerCase();
   let n = 0, skipped = 0;
@@ -1286,7 +1531,7 @@ const ACTIONS = {
   photosAtPlace: a => pickFiles(true, files => uploadPhotos(files, { place: a }).then(refresh)),
   facePhoto: a => pickFiles(false, async files => { const blob = await shrink(files[0], 400), path = await db.upload(`faces/${a}-${Date.now()}.jpg`, blob); await save('people', Object.assign({}, X().person[a], { photo: path })); toast('Looking good'); refresh(); }),
   mapTrip: a => { closeAll(); mapOpts.trip = a; mapOpts.year = 'All'; go('map'); setTimeout(() => drawMap(true), 120); },
-  replay: () => { closeAll(); startReplay(); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
+  replay: () => { closeAll(); startReplay(); }, whereWasI: () => { closeAll(); startWhereWasI(); }, familyPaths: () => { closeAll(); startFamilyPaths(); }, flyover: a => { closeAll(); flyover(a); }, wrapped: a => wrapped(a || S.today.slice(0, 4)),
   deleteTrip: a => { if ((X().legsByTrip.get(a) || []).length || (X().staysByTrip.get(a) || []).length) return toast('Delete or move its flights, drives and stays first.', true); confirmDel('trips', a, 'this trip').then(() => closeAll()); },
   deleteLeg: a => confirmDel('legs', a, 'this flight or drive'), deleteStay: a => confirmDel('stays', a, 'this stay'), deleteStory: a => confirmDel('stories', a, 'this story'),
   deletePhoto: a => { const p = D().photos.find(x => x.id === a); confirmDel('photos', a, 'this photo', () => db.removeFile(p.path)); },
@@ -1307,7 +1552,9 @@ const ACTIONS = {
   shareStays: a => submit(async () => { const st = sharedStays(a); await saveMany('stays', st.map(s => Object.assign({}, s, { people: uniq((s.people || []).concat(a)) }))); toast(`Added ${P0(a).name} to ${st.length} stays`); refresh(); }),
   addLegRow: () => $('#legRows').insertAdjacentHTML('beforeend', legRowHtml()), addStayRow: () => $('#stayRows').insertAdjacentHTML('beforeend', stayRowHtml()),
   removeRow: (a, el) => el.closest('.leg-row').remove(),
-  exportJson: () => { const b = new Blob([JSON.stringify(S.D, null, 1)], { type: 'application/json' }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = `miles-traveled-${S.today}.json`; a.click(); URL.revokeObjectURL(u); },
+  exportJson: () => { downloadBlob(new Blob([JSON.stringify(S.D, null, 1)], { type: 'application/json' }), `miles-traveled-${S.today}.json`); setLastBackup(); refresh(); },
+  exportPhotos: () => submit(exportPhotos),
+  restoreBackup: () => pickFiles(false, files => submit(() => restoreBackup(files[0])), '.json,application/json'),
   signOut: async () => { await db.signOut(); location.reload(); },
 };
 document.addEventListener('click', e => {
