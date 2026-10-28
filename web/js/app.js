@@ -329,7 +329,7 @@ function tripHtml(id) {
     ${stories.length ? `<div class="section"><h3>Stories</h3></div>${stories.map(s => storyCard(s)).join('')}` : ''}
     ${photos.length ? `<div class="section"><h3>Photos</h3></div>${photoGrid(photos)}` : ''}
     <div class="section"><h3>Flights and drives (${legs.length})</h3></div>
-    <div class="card list">${legs.map(l => `<div class="item"><div class="grow"><div class="t">${l.mode === 'Flight' ? '✈︎' : l.mode === 'Train' ? '🚆' : l.mode === 'Boat' ? '⛴' : '🚗'} ${esc(l.name || (l.from_place + ' → ' + l.to_place))}${l.class === 'First' ? ' <span class="chip gold">First</span>' : ''}</div>
+    <div class="card list">${legs.map(l => `<div class="item"><div class="grow"><div class="t">${l.mode === 'Flight' ? '✈︎' : l.mode === 'Train' ? '🚆' : l.mode === 'Boat' ? '⛴' : l.mode === 'Hike' ? '🥾' : '🚗'} ${esc(l.name || (l.from_place + ' → ' + l.to_place))}${l.class === 'First' ? ' <span class="chip gold">First</span>' : ''}</div>
       <div class="s">${niceDate(l.date) || 'no date'} · ${l.miles ? fmt(l.miles) + ' mi' : 'no miles'}${l.same_day ? ' · day trip' : ''}</div></div>${faces((l.people || []).filter(p => p !== S.focus), 20, 3)}
       <button class="icon" title="Return trip" data-click="returnLeg" data-arg="${esc(l.id)}">⇄</button><button class="icon" title="Edit" data-click="editLeg" data-arg="${esc(l.id)}">✎</button></div>`).join('') || '<div class="empty">None yet</div>'}</div>
     <div class="section"><h3>Where you slept (${stays.length})</h3></div>
@@ -423,7 +423,7 @@ function tripForm(id) {
   });
 }
 function readRow(r) { const o = {}; r.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); return o; }
-const legRowHtml = () => `<div class="leg-row"><select data-k="mode"><option>Flight</option><option>Car</option><option>Train</option><option>Bus</option><option>Boat</option></select>
+const legRowHtml = () => `<div class="leg-row"><select data-k="mode"><option>Flight</option><option>Car</option><option>Train</option><option>Bus</option><option>Boat</option><option>Hike</option></select>
   <input type="date" data-k="date"><input data-k="from" list="airportsList" placeholder="From: airport code or place"><input data-k="to" list="airportsList" placeholder="To"><input type="number" data-k="miles" placeholder="Miles (auto)"><button type="button" class="btn small ghost" data-click="removeRow">Remove</button></div>`;
 const stayRowHtml = () => `<div class="leg-row"><input data-k="place" list="placesList" placeholder="Place" style="grid-column:1/-1"><input type="date" data-k="arrive" title="First night"><input type="date" data-k="leave" title="Morning you left"><input type="number" data-k="cost" placeholder="Cost ($)"><button type="button" class="btn small ghost" data-click="removeRow">Remove</button></div>`;
 function endpoint(v, mode) {
@@ -446,7 +446,7 @@ function legForm({ id, trip, prefill, title } = {}) {
   const l = id ? D().legs.find(x => x.id === id) : Object.assign({ mode: 'Flight', trip_id: trip || (F().current || {}).id || '', date: S.today, people: trip ? tripPeople(trip).filter(p => P0(p).kind !== 'group') : [S.focus] }, prefill || {});
   if (!l.people || !l.people.length) l.people = [S.focus];
   openSheet(id ? 'Edit flight or drive' : (title || 'New flight or drive'), `${datalists()}<form id="legF">
-    <div class="two">${field({ k: 'mode', label: 'How', type: 'select', options: ['Flight', 'Car', 'Train', 'Bus', 'Boat'], value: l.mode })}${field({ k: 'trip_id', label: 'Trip', type: 'select', options: tripOptions(), value: l.trip_id })}</div>
+    <div class="two">${field({ k: 'mode', label: 'How', type: 'select', options: ['Flight', 'Car', 'Train', 'Bus', 'Boat', 'Hike'], value: l.mode })}${field({ k: 'trip_id', label: 'Trip', type: 'select', options: tripOptions(), value: l.trip_id })}</div>
     <div id="flightBits"><button type="button" class="btn small ghost" style="margin-top:10px" data-click="scanPass">📷 Scan a boarding pass</button>
       <div class="two">${field({ k: 'from_airport', label: 'From airport', value: l.from_airport, list: 'airportsList', ph: 'DEN' })}${field({ k: 'to_airport', label: 'To airport', value: l.to_airport, list: 'airportsList', ph: 'LGW' })}</div><div class="tiny muted" id="apHint"></div></div>
     <div class="two">${field({ k: 'from_place', label: 'From place', value: l.from_place, list: 'placesList' })}${field({ k: 'to_place', label: 'To place', value: l.to_place, list: 'placesList', hint: placeHint })}</div>
