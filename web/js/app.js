@@ -50,7 +50,7 @@ function loginPage() {
 // ------------------------------------------------------------------ navigation
 function go(page) {
   if (!['home', 'map', 'trips', 'stories', 'people', 'stats'].includes(page)) page = 'home';
-  if (UI.page === 'map' && page !== 'map') stopReplay();
+  if (UI.page === 'map' && page !== 'map') { stopReplay(); if ($('#mapWrap').classList.contains('fullscreen')) toggleMapFullscreen(false); }
   UI.page = page;
   history.replaceState(null, '', '#' + page);
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === 'page-' + page));
@@ -1111,11 +1111,33 @@ function renderMap() {
   if (!map) {
     map = L.map('map', { worldCopyJump: true, zoomControl: false }).setView([30, 0], 2);
     L.control.zoom({ position: 'topleft' }).addTo(map);
+    // full screen: the map covers the page, and the browser goes full screen too where it can (not on iPhone).
+    // The whole page goes full screen, not just the map, so sheets opened from map popups still show.
+    const FS = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
+      const b = L.DomUtil.create('a', 'leaflet-bar map-fs-btn'); b.href = '#'; b.title = 'Full screen'; b.setAttribute('role', 'button'); b.textContent = '⛶';
+      L.DomEvent.on(b, 'click', e => { L.DomEvent.stop(e); toggleMapFullscreen(); });
+      return b;
+    } });
+    new FS().addTo(map);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(map);
   }
   setTimeout(() => map.invalidateSize(), 60);
   drawMap();
 }
+function toggleMapFullscreen(force) {
+  const wrap = $('#mapWrap'), on = force !== undefined ? force : !wrap.classList.contains('fullscreen');
+  wrap.classList.toggle('fullscreen', on);
+  document.body.classList.toggle('map-fs', on);
+  const btn = wrap.querySelector('.map-fs-btn'); if (btn) { btn.textContent = on ? '✕' : '⛶'; btn.title = on ? 'Exit full screen' : 'Full screen'; }
+  try {
+    if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } catch (e) { /* the CSS overlay still works */ }
+  setTimeout(() => map && map.invalidateSize(), 120);
+}
+// leaving browser full screen (Esc or the system gesture) also leaves ours
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && $('#mapWrap') && $('#mapWrap').classList.contains('fullscreen')) toggleMapFullscreen(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#mapWrap') && $('#mapWrap').classList.contains('fullscreen')) toggleMapFullscreen(false); });
 async function drawMap(fit) {
   if (!map) return;
   Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
@@ -1266,7 +1288,8 @@ function startWhereWasI() {
   // nights per second: trips play slowly enough to follow, long stretches at home fly by
   const tick = t => {
     if (st.stop || !st.playing) return;
-    const dt = Math.min(.1, (t - st.t) / 1000); st.t = t;
+    // the first frame's timestamp can be a hair before the one taken at play(), so never step backwards
+    const dt = Math.max(0, Math.min(.1, (t - st.t) / 1000)); st.t = t;
     const n = nights[Math.floor(st.pos)];
     st.pos += dt * st.speed * (n.away ? 5 : 60);
     if (st.pos >= nights.length - 1) { st.pos = nights.length - 1; show(st.pos); play(false); return; }
