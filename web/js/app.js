@@ -308,6 +308,119 @@ function tripDetail(id) {
     setTimeout(() => m.invalidateSize(), 60);
   });
 }
+// ------------------------------------------------------------------ day by day
+// A calendar of one trip: for every date, how you got around that day and where you slept that night.
+// Tap a night to change where you slept (it splits and merges the stays for you); tap + Travel to add a drive or flight on that day.
+const legIcon = l => l.mode === 'Flight' ? '✈︎' : l.mode === 'Train' ? '🚆' : l.mode === 'Boat' ? '⛴' : l.mode === 'Hike' ? '🥾' : l.mode === 'Bus' ? '🚌' : '🚗';
+function tripRange(id) {
+  const t = X().trip[id] || {}, legs = X().legsByTrip.get(id) || [], stays = X().staysByTrip.get(id) || [];
+  const ds = [t.start_date, t.end_date].concat(legs.map(l => l.date), stays.flatMap(s => [s.arrive, s.leave])).filter(isDate).sort();
+  return ds.length ? [ds[0], ds[ds.length - 1]] : null;
+}
+// The stay for one night: this trip's first, then anyone else's of yours from another trip.
+function nightStay(id, d) {
+  const mine = s => s.arrive <= d && d < s.leave;
+  const ts = (X().staysByTrip.get(id) || []).filter(mine);
+  return ts.find(s => has(s, S.focus)) || ts[0] || D().stays.find(s => mine(s) && has(s, S.focus)) || null;
+}
+function dayByDay(id) {
+  if (!tripRange(id)) return toast('Give the trip a start and end date first (Edit).', true);
+  openSheet(() => `${(X().trip[id] || {}).name || 'Trip'} · day by day`, () => dayHtml(id), () => {
+    // come back to the same day after editing one
+    const c = $('#sheet .sheet-card'); if (UI.dayScroll && UI.dayScroll.id === id) c.scrollTop = UI.dayScroll.y;
+  });
+}
+function dayHtml(id) {
+  const t = X().trip[id]; if (!t) return '<div class="empty">This trip was deleted.</div>';
+  const [a, b] = tripRange(id), legs = orderLegs(X().legsByTrip.get(id) || []), byDay = groupBy(legs.filter(l => isDate(l.date)), l => l.date);
+  const undated = legs.filter(l => !isDate(l.date)), wk = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const legRow = l => `<div class="item tap" data-click="editLeg" data-arg="${esc(l.id)}"><div class="grow"><div class="t">${legIcon(l)} ${esc(l.name || `${l.from_place || '?'} → ${l.to_place || '?'}`)}</div>
+    <div class="s">${l.miles ? fmt(l.miles) + ' mi' : 'no miles'}${l.date_confidence && /Estimated/.test(l.date_confidence) ? ' · estimated date' : ''}</div></div><span class="icon">✎</span></div>`;
+  const rows = [];
+  for (let d = a, n = 1; d <= b; d = addDays(d, 1), n++) {
+    const st = nightStay(id, d), last = d === b, dl = byDay.get(d) || [];
+    const other = st && st.trip_id !== id ? ` <span class="chip gray">${esc((X().trip[st.trip_id] || {}).name || 'other trip')}</span>` : '';
+    const night = st ? `🛏 ${esc(st.place)}${st.confidence === 'In transit' ? ' <span class="chip gray">in transit</span>' : ''}${st.confidence === 'Estimated' ? ' <span class="chip gray">estimated</span>' : ''}${other}`
+      : last ? '<span class="muted">🏠 Home (last day)</span>' : '<span class="muted">🛏 Not logged — tap to set</span>';
+    const wd = wk[new Date(d + 'T12:00:00').getDay()];
+    rows.push(`<div class="day-row"><div class="day-h"><b>${wd}, ${niceDate(d, false)}</b><span class="tiny muted">Day ${n}</span></div>
+      <div class="card list">${dl.map(legRow).join('')}
+        <div class="item tap day-night" data-click="dayNight" data-arg="${esc(id + '|' + d)}"><div class="grow">${night}</div><span class="icon">✎</span></div></div>
+      <button class="btn small ghost day-add" data-click="dayLeg" data-arg="${esc(id + '|' + d)}">+ Travel on ${niceDate(d, false)}</button></div>`);
+  }
+  return `<p class="small muted">Tap a night to change where you slept. Tap a flight or drive to edit it, or add travel on any day. Changing a night splits or joins the stays for you.</p>
+    <div class="row wrap" style="gap:8px;margin:8px 0"><button class="btn small ghost" data-click="dayExtend" data-arg="${esc(id + '|-1')}">+ Day before</button><button class="btn small ghost" data-click="dayExtend" data-arg="${esc(id + '|1')}">+ Day after</button></div>
+    ${rows.join('')}
+    ${undated.length ? `<div class="section"><h3>No date yet</h3></div><div class="card list">${undated.map(legRow).join('')}</div>` : ''}`;
+}
+// Where you were at the start of a day: the end of that day's last leg so far, else where you slept the night before.
+function dayStart(id, d) {
+  const dl = orderLegs((X().legsByTrip.get(id) || []).filter(l => l.date === d));
+  if (dl.length && dl[dl.length - 1].to_place) return dl[dl.length - 1].to_place;
+  const prev = nightStay(id, addDays(d, -1)); if (prev) return prev.place;
+  const home = F().nights.find(n => n.d === addDays(d, -1)); return home ? home.place : '';
+}
+const keepDayScroll = id => { UI.dayScroll = { id, y: $('#sheet .sheet-card').scrollTop }; };
+function dayLeg(arg) {
+  const i = arg.lastIndexOf('|'), id = arg.slice(0, i), d = arg.slice(i + 1); keepDayScroll(id);
+  legForm({ trip: id, title: `Travel on ${niceDate(d)}`, prefill: { mode: 'Car', date: d, from_place: dayStart(id, d) } });
+}
+function dayNight(arg) {
+  const i = arg.lastIndexOf('|'), id = arg.slice(0, i), d = arg.slice(i + 1), st = nightStay(id, d); keepDayScroll(id);
+  const guess = st ? st.place : ((X().legsByTrip.get(id) || []).filter(l => l.date === d).map(l => l.to_place).filter(Boolean).pop() || '');
+  openSheet(`Night of ${niceDate(d)}`, `${datalists()}<form id="nightF">
+    ${field({ k: 'place', label: 'Where you slept', value: guess, list: 'placesList', hint: placeHint })}
+    <div class="two">${field({ k: 'nights', label: 'Nights in a row', type: 'number', value: 1 })}${field({ k: 'transit', label: 'Layover', type: 'check', text: 'In transit (never left the airport)', value: st && st.confidence === 'In transit' })}</div>
+    <p class="tiny muted">Setting more than one night also changes the nights after this one. Stays on either side in the same place are joined into one.</p>
+    <div class="row" style="margin-top:16px"><button class="btn grow">Save</button>${st ? `<button type="button" class="btn danger" id="nightClear">Not on the trip this night</button>` : ''}</div></form>`, body => {
+    const f = body.querySelector('#nightF');
+    const go = place => submit(async () => {
+      const n = Math.max(1, Math.min(60, Math.round(num(f.querySelector('[name=nights]').value) || 1)));
+      if (place != null) { checkPlace(place); if (!place) throw new Error('Pick a place.'); }
+      await setNights(id, d, n, place, f.querySelector('[name=transit]').checked);
+      toast('Saved'); closeSheet(); refresh();
+    });
+    f.onsubmit = e => { e.preventDefault(); go(f.querySelector('[name=place]').value.trim()); };
+    const c = body.querySelector('#nightClear'); if (c) c.onclick = () => go(null);
+  });
+}
+// Make nights d .. d+n-1 be `place` (or nobody's stay when place is null): trims or splits the stays that overlap,
+// then joins the new nights onto a matching stay right before or after.
+async function setNights(id, d, n, place, transit) {
+  const end = addDays(d, n), cover = nightStay(id, d);
+  let people = cover && cover.people && cover.people.length ? cover.people.slice() : tripPeople(id).filter(p => P0(p).kind !== 'group');
+  if (!people.includes(S.focus)) people.push(S.focus);
+  const share = s => (s.people || []).some(p => people.includes(p));
+  const hit = D().stays.filter(s => s.arrive < end && d < s.leave && share(s));
+  const ups = new Map(), dels = new Set();
+  const copy = s => { const c = Object.assign({}, s); delete c.created_at; return c; };
+  hit.forEach(s => {
+    const left = s.arrive < d, right = s.leave > end;
+    if (left) ups.set(s.id, Object.assign(copy(s), { leave: d }));
+    if (right) { const r = Object.assign(copy(s), { arrive: end }); if (left) r.id = newId(); ups.set(r.id, r); }
+    if (!left && !right) dels.add(s.id);
+  });
+  if (place) {
+    const conf = transit ? 'In transit' : 'Logged', key = s => [s.place, s.trip_id || '', s.confidence === 'In transit', (s.people || []).slice().sort().join(',')].join('|');
+    let rec = { id: newId(), trip_id: id, place, arrive: d, leave: end, people, confidence: conf };
+    const pool = D().stays.filter(s => !dels.has(s.id)).map(s => ups.get(s.id) || s).concat([...ups.values()].filter(u => !D().stays.some(s => s.id === u.id)));
+    const prev = pool.find(s => s.leave === d && key(s) === key(rec)), next = pool.find(s => s.arrive === end && key(s) === key(rec));
+    if (prev) { rec = Object.assign(copy(prev), { leave: end }); }
+    if (next) { rec.leave = next.leave; if (next.id !== rec.id) { dels.add(next.id); ups.delete(next.id); } }
+    ups.set(rec.id, rec);
+  }
+  for (const x of dels) if (D().stays.some(s => s.id === x)) await remove('stays', x);
+  if (ups.size) await saveMany('stays', [...ups.values()]);
+}
+function dayExtend(arg) {
+  const i = arg.lastIndexOf('|'), id = arg.slice(0, i), k = +arg.slice(i + 1), t = X().trip[id], [a, b] = tripRange(id); keepDayScroll(id);
+  submit(async () => {
+    const rec = Object.assign({}, t); delete rec.created_at;
+    if (k < 0) rec.start_date = addDays(a, -1); else rec.end_date = addDays(b, 1);
+    if (!isDate(rec.end_date)) rec.end_date = b; if (!isDate(rec.start_date)) rec.start_date = a;
+    await save('trips', rec); refresh();
+  });
+}
 function tripHtml(id) {
   const t = X().trip[id]; if (!t) return '<div class="empty">This trip was deleted.</div>';
   const legs = (X().legsByTrip.get(id) || []).slice().sort((a, b) => String(a.date) < String(b.date) ? -1 : 1);
@@ -326,7 +439,7 @@ function tripHtml(id) {
       ${cost ? statCard('$' + fmt(cost), `$${fmt1(miles ? cost / miles : 0)}/mile · $${fmt(nightsN ? cost / nightsN : 0)}/night`) : ''}</div>
     ${t.notes ? `<p class="small muted">${esc(t.notes)}</p>` : ''}
     <div class="row wrap" style="gap:8px;margin:12px 0">
-      <button class="btn small" data-click="editTrip" data-arg="${esc(id)}">Edit</button><button class="btn small ghost" data-click="newLeg" data-arg="${esc(id)}">+ Flight/drive</button>
+      <button class="btn small" data-click="editTrip" data-arg="${esc(id)}">Edit</button><button class="btn small" data-click="dayByDay" data-arg="${esc(id)}">📅 Day by day</button><button class="btn small ghost" data-click="newLeg" data-arg="${esc(id)}">+ Flight/drive</button>
       <button class="btn small ghost" data-click="newStay" data-arg="${esc(id)}">+ Stay</button><button class="btn small ghost" data-click="newStory" data-arg="${esc(id)}">+ Story</button><button class="btn small gold" data-click="flyover" data-arg="${esc(id)}">🎬 Fly this trip</button>
       <button class="btn small ghost" data-click="addPhotos" data-arg="${esc(id)}">+ Photos</button><button class="btn small ghost" data-click="mapTrip" data-arg="${esc(id)}">Big map</button></div>
     ${stories.length ? `<div class="section"><h3>Stories</h3></div>${stories.map(s => storyCard(s)).join('')}` : ''}
@@ -1547,6 +1660,7 @@ const ACTIONS = {
   more: () => moreSheet(), addMenu: () => addMenu(), imHere: () => { closeAll(); imHere(); },
   newTrip: () => tripForm(), editTrip: a => tripForm(a), newLeg: a => legForm({ trip: a }), editLeg: a => legForm({ id: a }),
   returnLeg: a => { const l = D().legs.find(x => x.id === a); if (l) legForm({ title: 'Return trip', trip: l.trip_id, prefill: { mode: l.mode, trip_id: l.trip_id, from_airport: l.to_airport, to_airport: l.from_airport, from_place: l.to_place, to_place: l.from_place, miles: l.miles, people: l.people, date: '', name: l.to_airport && l.from_airport ? `${l.to_airport} → ${l.from_airport}` : '' } }); },
+  dayByDay: a => { UI.dayScroll = null; dayByDay(a); }, dayLeg: a => dayLeg(a), dayNight: a => dayNight(a), dayExtend: a => dayExtend(a),
   newStay: a => stayForm({ trip: a }), editStay: a => stayForm({ id: a }), newStory: a => storyForm({ trip: a }), editStory: a => storyForm({ id: a }),
   storyAtPlace: a => storyForm({ prefill: { place: a } }), newPlace: () => placeForm(), editPlace: a => placeForm({ id: a }), pinToPlace: a => pinToPlace(a),
   newPerson: () => personForm(), editPerson: a => personForm(a), addPickPerson: () => submit(addPickPerson), newHome: a => homeForm(a || S.focus),
