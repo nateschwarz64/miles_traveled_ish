@@ -1,7 +1,7 @@
 // Miles Traveled — pages, forms and actions.
 import { $, esc, num, fmt, fmt1, isDate, yearOf, niceDate, addDays, daysBetween, hav, parseLL, groupBy, sum, uniq, pct, newId, sumBy, toast,
-  cachedJson, arc, simplify, onVisible, EARTH, MOON, LIGHT_MPS, SCHENGEN, CONTINENTS, MONTHS, TRIP_TYPES, SERIES, OTHER, ATLAS_ALIAS, CDN } from './util.js';
-import { db, S, load, save, saveMany, remove, removeWhere, derive, hydrateImages, legEnds, isFlight, groundCountries, tripMiles, has, person, yearSlice, yearOfTrip, companions, schengenUsed } from './store.js';
+  cachedJson, arc, arcLines, splitDateline, wrapLng, simplify, onVisible, EARTH, MOON, LIGHT_MPS, SCHENGEN, CONTINENTS, MONTHS, TRIP_TYPES, SERIES, OTHER, ATLAS_ALIAS, CDN } from './util.js';
+import { db, S, load, save, saveMany, remove, removeWhere, derive, hydrateImages, legEnds, orderLegs, isFlight, groundCountries, tripMiles, has, person, yearSlice, yearOfTrip, companions, schengenUsed } from './store.js';
 import { odometer, countUp, globe, race, lineChart, fillStamps } from './fun.js';
 
 const UI = { page: 'home', tripYear: 'All', tripType: 'All', tripWho: 'mine', tripQuery: '', storyQuery: '', storyPerson: '', statsYear: 'All', raceMetric: 'miles' };
@@ -301,7 +301,7 @@ function tripDetail(id) {
     const m = L.map(box, { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(m);
     const g = L.featureGroup().addTo(m);
-    (X().legsByTrip.get(id) || []).forEach(l => { const [a, b] = legEnds(l); if (a && b) L.polyline(isFlight(l) ? arc(a, b) : [a, b], { color: isFlight(l) ? '#2a78d6' : '#eb6834', weight: 2.5, dashArray: isFlight(l) ? '5 5' : null }).addTo(g); });
+    (X().legsByTrip.get(id) || []).forEach(l => { const [a, b] = legEnds(l); if (a && b) L.polyline(isFlight(l) ? arcLines(a, b) : splitDateline([a, b]), { color: isFlight(l) ? '#2a78d6' : '#eb6834', weight: 2.5, dashArray: isFlight(l) ? '5 5' : null }).addTo(g); });
     (X().staysByTrip.get(id) || []).forEach(s => { const ll = X().ll[s.place]; if (ll) L.circleMarker(ll, { radius: 5 + Math.min(10, Math.sqrt(daysBetween(s.arrive, s.leave)) * 2), color: '#c8402f', fillOpacity: .7 }).bindTooltip(s.place).addTo(g); });
     (X().pinsByTrip.get(id) || []).forEach(p => { const ll = parseLL(p.latlong); if (ll) L.circleMarker(ll, { radius: 3, color: '#1baf7a', fillOpacity: 1 }).bindTooltip(p.name).addTo(g); });
     if (g.getLayers().length) m.fitBounds(g.getBounds().pad(0.2)); else m.setView([30, 0], 1);
@@ -1016,8 +1016,7 @@ function wrapped(year) {
 // short hops, and a postcard for every place you slept. Ends on a summary card.
 async function flyover(id) {
   const t = X().trip[id]; if (!t) return;
-  const legs = (X().legsByTrip.get(id) || []).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1])
-    .sort((a, b) => String(a.l.date) < String(b.l.date) ? -1 : String(a.l.date) > String(b.l.date) ? 1 : String(a.l.id).localeCompare(String(b.l.id), undefined, { numeric: true }));
+  const legs = orderLegs(X().legsByTrip.get(id) || []).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1]);
   const stays = (X().staysByTrip.get(id) || []).filter(s => X().ll[s.place]).sort((a, b) => a.arrive < b.arrive ? -1 : 1);
   if (!legs.length && !stays.length) return toast('Add flights, drives or stays to fly this trip.', true);
   // one timeline: on the same day the leg comes before the stay it lands at
@@ -1164,7 +1163,7 @@ async function drawMap(fit) {
     const g = L.featureGroup();
     P.legs.filter(l => inY(l.date) && inT(l.trip_id)).forEach(l => {
       const [a, b] = legEnds(l); if (!a || !b || (a[0] === b[0] && a[1] === b[1])) return;
-      L.polyline(isFlight(l) ? arc(a, b) : [a, b], { color: isFlight(l) ? '#2a78d6' : '#eb6834', weight: isFlight(l) ? 1.6 : 2.6, opacity: .7, dashArray: isFlight(l) ? '4 4' : null })
+      L.polyline(isFlight(l) ? arcLines(a, b) : splitDateline([a, b]), { color: isFlight(l) ? '#2a78d6' : '#eb6834', weight: isFlight(l) ? 1.6 : 2.6, opacity: .7, dashArray: isFlight(l) ? '4 4' : null })
         .bindPopup(`<b>${esc(l.name || '')}</b><br>${niceDate(l.date)} · ${fmt(l.miles)} mi<br>${esc((X().trip[l.trip_id] || {}).name || '')}<br>${(l.people || []).filter(p => p !== S.focus).map(p => esc(P0(p).name)).join(', ')}`).addTo(g);
     });
     mapLayers.routes = g.addTo(map);
@@ -1205,7 +1204,7 @@ function startReplay() {
   if (UI.page !== 'map') { go('map'); setTimeout(startReplay, 300); return; }
   stopReplay();
   const P = F(), inY = d => mapOpts.year === 'All' || String(d || '').slice(0, 4) === mapOpts.year;
-  const legs = P.legs.filter(l => isDate(l.date) && inY(l.date) && (!mapOpts.trip || l.trip_id === mapOpts.trip)).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.id).localeCompare(String(b.id))).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1]);
+  const legs = orderLegs(P.legs.filter(l => isDate(l.date) && inY(l.date) && (!mapOpts.trip || l.trip_id === mapOpts.trip))).map(l => ({ l, e: legEnds(l) })).filter(x => x.e[0] && x.e[1]);
   if (!legs.length) return toast('Nothing to replay yet.', true);
   Object.values(mapLayers).forEach(l => map.removeLayer(l)); mapLayers = {};
   const g = L.featureGroup().addTo(map), plane = L.marker(legs[0].e[0], { icon: L.divIcon({ className: 'plane-icon', html: '✈️', iconSize: [20, 20] }) }).addTo(g);
@@ -1229,7 +1228,7 @@ function startReplay() {
     const tick = t => {
       if (st.stop) return;
       const k = Math.min(1, (t - t0) / dur), n = Math.max(1, Math.round(k * (full.length - 1)));
-      line.setLatLngs(full.slice(0, n + 1)); plane.setLatLng(full[n]);
+      line.setLatLngs(splitDateline(full.slice(0, n + 1))); plane.setLatLng([full[n][0], wrapLng(full[n][1])]);
       st.miles = m0 + num(l.miles) * k; $('#rpMiles').textContent = fmt(st.miles);
       if (k < 1) requestAnimationFrame(tick); else setTimeout(nextLeg, 60 / st.speed);
     };
@@ -1270,19 +1269,20 @@ function startWhereWasI() {
   const st = replayState = { stop: false, speed: 1, playing: false, pos: 0, last: -1 };
   const show = i => {
     if (i === st.last) return;
-    const n = nights[i], t = tot[i], ll = X().ll[n.place], moved = st.last < 0 || nights[st.last].place !== n.place;
+    const n = nights[i], t = tot[i], ll = X().ll[n.place], prev = st.last < 0 ? null : X().ll[nights[st.last].place], moved = !prev || nights[st.last].place !== n.place;
     st.last = i;
     pin.setLatLng(ll);
     dots.forEach(d => { const on = d.i <= i; if (on !== d.on) { d.on = on; on ? d.m.addTo(g) : g.removeLayer(d.m); } });
     // trail through the last 12 places, found from the list of nights where the place changed
     let lo = 0, hi = changes.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (changes[mid] <= i) lo = mid; else hi = mid - 1; }
-    trail.setLatLngs(changes.slice(Math.max(0, lo - 11), lo + 1).map(k => X().ll[nights[k].place]));
+    trail.setLatLngs(splitDateline(changes.slice(Math.max(0, lo - 11), lo + 1).map(k => X().ll[nights[k].place])));
     $('#wwDate').textContent = niceDate(n.d);
     const trip = n.trip && X().trip[n.trip];
     $('#wwSub').textContent = `${n.place}${n.away ? (trip ? ' · ' + trip.name : '') : ' · home'}${n.transit ? ' · in transit' : ''}`;
     $('#wwAbroad').textContent = fmt(t.abroad); $('#wwCountries').textContent = t.countries; $('#wwMiles').textContent = fmt(t.miles);
     $('#wwRange').value = i;
-    if (moved && !map.getBounds().pad(-.1).contains(ll)) map.panTo(ll, { animate: true, duration: .6 });
+    // across the date line, jump straight there rather than sliding the long way round the world
+    if (moved && !map.getBounds().pad(-.1).contains(ll)) map.panTo(ll, { animate: !prev || Math.abs(prev[1] - ll[1]) <= 180, duration: .6 });
   };
   const play = on => { st.playing = on; $('#wwPlay').textContent = on ? '❚❚' : '▶'; if (on) { st.t = performance.now(); requestAnimationFrame(tick); } };
   // nights per second: trips play slowly enough to follow, long stretches at home fly by
@@ -1330,7 +1330,7 @@ function startFamilyPaths() {
       const col = personColor(x.p), w = 2 + (on.length - 1 - k) * 1.5;
       x.P.legs.forEach(l => {
         const [a, b] = legEnds(l); if (!a || !b || (a[0] === b[0] && a[1] === b[1])) return;
-        L.polyline(isFlight(l) ? arc(a, b) : [a, b], { color: col, weight: w, opacity: .75 }).bindTooltip(`${esc(x.p.name)}: ${esc(l.name || '')} · ${niceDate(l.date)}`).addTo(g);
+        L.polyline(isFlight(l) ? arcLines(a, b) : splitDateline([a, b]), { color: col, weight: w, opacity: .75 }).bindTooltip(`${esc(x.p.name)}: ${esc(l.name || '')} · ${niceDate(l.date)}`).addTo(g);
       });
     });
     // crossings: same place, same night, at least one of them away from home; runs of nights merge into one star

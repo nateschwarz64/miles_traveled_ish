@@ -55,6 +55,27 @@ export function toast(msg, bad) {
 const _cache = {};
 export function cachedJson(url) { if (!_cache[url]) _cache[url] = fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }); return _cache[url]; }
 // great-circle arc points [lat, lon] that stay continuous across the dateline
+// Cut a line wherever it crosses the date line, so it never streaks across the whole map.
+// Takes [lat, lng] points (longitudes may run past ±180) and returns a list of lines with every longitude in -180..180.
+export const wrapLng = x => ((x + 180) % 360 + 360) % 360 - 180;
+export function splitDateline(pts) {
+  if (pts.length < 2) return [pts.map(p => [p[0], wrapLng(p[1])])];
+  const u = [pts[0].slice()];
+  for (let i = 1; i < pts.length; i++) { let x = pts[i][1]; while (x - u[i - 1][1] > 180) x -= 360; while (x - u[i - 1][1] < -180) x += 360; u.push([pts[i][0], x]); }
+  const out = []; let cur = [], k0 = Math.floor((u[0][1] + 180) / 360);
+  cur.push([u[0][0], u[0][1] - k0 * 360]);
+  for (let i = 1; i < u.length; i++) {
+    const k = Math.floor((u[i][1] + 180) / 360);
+    if (k !== k0) {
+      const edge = (Math.max(k, k0)) * 360 - 180, a = u[i - 1], b = u[i], f = (edge - a[1]) / (b[1] - a[1]), lat = a[0] + (b[0] - a[0]) * f;
+      cur.push([lat, edge - k0 * 360]); out.push(cur); cur = [[lat, edge - k * 360]]; k0 = k;
+    }
+    cur.push([u[i][0], u[i][1] - k * 360]);
+  }
+  out.push(cur);
+  return out;
+}
+export const arcLines = (a, b, n) => splitDateline(arc(a, b, n));
 export function arc(a, b, n = 32) {
   const r = Math.PI / 180, [la1, lo1] = [a[0] * r, a[1] * r], [la2, lo2] = [b[0] * r, b[1] * r];
   const d = 2 * Math.asin(Math.sqrt(Math.sin((la2 - la1) / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2));
