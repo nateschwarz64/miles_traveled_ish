@@ -134,6 +134,32 @@ export const legEnds = l => {
 };
 export const isFlight = l => l.mode === 'Flight';
 export const groundCountries = l => isFlight(l) ? [] : [S.X.countryOf(l.from_place), S.X.countryOf(l.to_place)].filter(Boolean);
+// Put legs in travel order. Legs on the same day are chained: each one starts where the last one ended
+// (or, for the first leg of a day, where the previous day ended), so the drive to the airport plays before the flight.
+// A little loop around town (from = to) goes first while you're still in that place.
+export function orderLegs(legs) {
+  const byId = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+  const dated = legs.filter(l => isDate(l.date)), undated = legs.filter(l => !isDate(l.date)).sort(byId);
+  const days = groupBy(dated, l => l.date), out = [];
+  let cur = null;
+  [...days.keys()].sort().forEach(d => {
+    const rem = days.get(d).slice().sort(byId).map(l => ({ l, e: legEnds(l) }));
+    if (!cur) { // first day: start with a leg that nothing else that day leads into
+      const s = rem.find(x => x.e[0] && !rem.some(y => y !== x && y.e[1] && hav(y.e[1], x.e[0]) < 30 && !(y.e[0] && hav(y.e[0], y.e[1]) < 1)));
+      cur = (s || rem[0]).e[0] || null;
+    }
+    while (rem.length) {
+      let best = 0, bs = Infinity;
+      rem.forEach((x, i) => {
+        const d0 = cur && x.e[0] ? hav(cur, x.e[0]) : 1e6, loop = x.e[0] && x.e[1] && hav(x.e[0], x.e[1]) < 1;
+        const score = d0 < 30 ? (loop ? .5 : 1) + d0 / 10 : 5 + d0;
+        if (score < bs) { bs = score; best = i; }
+      });
+      const x = rem.splice(best, 1)[0]; out.push(x.l); if (x.e[1]) cur = x.e[1];
+    }
+  });
+  return out.concat(undated);
+}
 export const tripMiles = id => sum(S.X.legsByTrip.get(id) || [], l => l.miles);
 export const has = (row, pid) => (row.people || []).includes(pid);
 
