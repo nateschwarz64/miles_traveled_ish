@@ -1409,7 +1409,7 @@ function moreSheet() {
     <div class="card"><p class="small muted">Pick the files from your old AppSheet folders (Trips_Images, Legs_Images…). Each one is matched to its trip or leg by file name.</p><button class="btn small ghost" data-click="importLegacy">Choose photos</button></div>
     <div class="section"><h3>Add to your lists</h3></div>
     <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="newPlace">+ Place</button><button class="btn small ghost" data-click="newPerson">+ Person</button><button class="btn small ghost" data-click="newHome" data-arg="${esc(S.focus)}">+ Home</button></div>
-    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>
+    <div class="section"><h3>You</h3></div><div class="card small">Signed in as ${esc(S.email || '')}. <span class="tiny muted">App version 1.3</span> ${db.kind === 'local' ? '(test copy, nothing is saved)' : ''}<div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn small ghost" data-click="setPassword">Set password</button><button class="btn small ghost" data-click="signOut">Sign out</button></div></div>
     <div class="section"><h3>Backups</h3><span class="kicker">${lastBackup() ? 'last one ' + niceDate(lastBackup()) : 'none on this device yet'}</span></div>
     <div class="card"><p class="small muted">The data file has every trip, flight, stay, place, person and story. Photos come as a separate .zip. Keep both somewhere safe, like Google Drive. Restoring adds back anything missing and puts matching rows back to the backup's version; anything added since stays.</p>
       <div class="row wrap" style="gap:8px"><button class="btn small ghost" data-click="exportJson">Download data</button><button class="btn small ghost" data-click="exportPhotos">Download photos (.zip)</button><button class="btn small ghost" data-click="restoreBackup">Restore from backup</button></div></div>`;
@@ -1578,6 +1578,12 @@ const ACTIONS = {
   exportJson: () => { downloadBlob(new Blob([JSON.stringify(S.D, null, 1)], { type: 'application/json' }), `miles-traveled-${S.today}.json`); setLastBackup(); refresh(); },
   exportPhotos: () => submit(exportPhotos),
   restoreBackup: () => pickFiles(false, files => submit(() => restoreBackup(files[0])), '.json,application/json'),
+  setPassword: () => {
+    const pw = prompt('New password (at least 6 characters):'); if (pw == null) return;
+    if (pw.length < 6) { toast('Password needs at least 6 characters'); return; }
+    if (prompt('Type it again to confirm:') !== pw) { toast("Passwords didn't match"); return; }
+    submit(async () => { await db.setPassword(pw); toast('Password updated'); });
+  },
   signOut: async () => { await db.signOut(); location.reload(); },
 };
 document.addEventListener('click', e => {

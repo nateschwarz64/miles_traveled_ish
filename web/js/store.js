@@ -15,6 +15,7 @@ function supabaseAdapter(cfg) {
     async signIn(email) { check(await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } })); },
     async signInPassword(email, password) { check(await sb.auth.signInWithPassword({ email, password })); },
     async signOut() { await sb.auth.signOut(); },
+    async setPassword(password) { check(await sb.auth.updateUser({ password })); },
     onAuth(fn) { sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT') fn(ev); }); },
     async loadAll() {
       const out = {};
@@ -40,7 +41,7 @@ function localAdapter(seed) {
   return {
     kind: 'local',
     async email() { return (db.people.find(p => p.email) || {}).email || 'demo@example.com'; },
-    async signIn() {}, async signOut() {}, onAuth() {},
+    async signIn() {}, async signOut() {}, async setPassword() {}, onAuth() {},
     async loadAll() { return JSON.parse(JSON.stringify(db)); },
     async upsert(t, row) {
       const k = keyOf(t); if (!row[k]) row[k] = newId();
